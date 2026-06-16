@@ -1,12 +1,20 @@
 import './app-paths'
+
+// Prevent EPIPE crashes when stdout/stderr pipes are broken (e.g., terminal
+// closed while Electron is still running). Without this, any console.log call
+// from third-party code (updater, etc.) would throw an uncaught exception.
+for (const stream of [process.stdout, process.stderr]) {
+  stream?.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EPIPE') return
+    throw err
+  })
+}
+
 import { app } from 'electron'
 import { setupCSP } from './csp'
-import { registerExportHandlers } from './export/export-handler'
-import { stopExportProcess } from './export/ffmpeg-utils'
 import { registerAppHandlers } from './ipc/app-handlers'
 import { registerFileHandlers } from './ipc/file-handlers'
 import { registerLogHandlers } from './ipc/log-handlers'
-import { registerVideoProcessingHandlers } from './ipc/video-processing-handlers'
 import { logger } from './logger'
 import { initSessionLog } from './logging-management'
 import { stopPythonBackend } from './python-backend'
@@ -33,8 +41,6 @@ if (!gotLock) {
   registerAppHandlers()
   registerFileHandlers()
   registerLogHandlers()
-  registerExportHandlers()
-  registerVideoProcessingHandlers()
 
   app.on('second-instance', () => {
     const mainWindow = getMainWindow()
@@ -77,7 +83,6 @@ if (!gotLock) {
   })
 
   app.on('before-quit', () => {
-    stopExportProcess()
     stopPythonBackend()
   })
 }

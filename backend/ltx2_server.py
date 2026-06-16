@@ -27,14 +27,6 @@ from pathlib import Path
 
 import torch
 
-import services.patches.record_stream_fix as _record_stream_fix  # pyright: ignore[reportUnusedImport]  # Remove once ltx-core includes the fix
-del _record_stream_fix
-import services.patches.safetensors_loader_fix as _safetensors_loader_fix  # pyright: ignore[reportUnusedImport]  # Remove once safetensors/PyTorch fix the mmap issue
-del _safetensors_loader_fix
-import services.patches.safetensors_metadata_fix as _safetensors_metadata_fix  # pyright: ignore[reportUnusedImport]  # Remove once safetensors supports read-only mmap
-del _safetensors_metadata_fix
-import services.patches.pinned_pool_fix as _pinned_pool_fix  # pyright: ignore[reportUnusedImport]  # Remove once ltx-core restores bounded pinned pool
-del _pinned_pool_fix
 
 from state.app_settings import AppSettings
 
@@ -166,7 +158,6 @@ from services.gpu_info.gpu_info_impl import GpuInfoImpl
 
 migrate_legacy_models_layout(APP_DATA_DIR)
 
-LTX_API_BASE_URL = "https://api.ltx.video"
 
 
 def _resolve_local_generations_mode() -> LocalGenerationMode:
@@ -215,7 +206,6 @@ runtime_config = RuntimeConfig(
     default_models_dir=DEFAULT_MODELS_DIR,
     outputs_dir=OUTPUTS_DIR,
     settings_file=SETTINGS_FILE,
-    ltx_api_base_url=LTX_API_BASE_URL,
     local_generations_mode=LOCAL_GENERATIONS_MODE,
     use_sage_attention=use_sage_attention,
     camera_motion_prompts=CAMERA_MOTION_PROMPTS,

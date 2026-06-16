@@ -3,23 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, NewType, Protocol
+from typing import TYPE_CHECKING, NewType
 
 from api_types import ModelCheckpointID
-from state.conditioning_cache import ConditioningCache
 
 if TYPE_CHECKING:
     from state.app_settings import AppSettings
-    from services.interfaces import (
-        A2VPipeline,
-        DepthProcessorPipeline,
-        FastVideoPipeline,
-        ImageGenerationPipeline,
-        IcLoraPipeline,
-        PoseProcessorPipeline,
-        RetakePipeline,
-        TextEncoder,
-    )
+    from services.interfaces import TextEncoder
     import torch
 
 
@@ -76,11 +66,6 @@ class TextEncodingResult:
     audio_context: torch.Tensor | None
 
 
-class CachedTextEncoder(Protocol):
-    def to(self, device: torch.device) -> "CachedTextEncoder":
-        ...
-
-
 def _new_prompt_cache() -> dict[tuple[str, bool], TextEncodingResult]:
     return {}
 
@@ -90,114 +75,6 @@ class TextEncoderState:
     service: TextEncoder
     prompt_cache: dict[tuple[str, bool], TextEncodingResult] = field(default_factory=_new_prompt_cache)
     api_embeddings: TextEncodingResult | None = None
-    cached_encoder: CachedTextEncoder | None = None
-
-
-# ============================================================
-# Pipeline state
-# ============================================================
-
-
-@dataclass
-class VideoPipelineState:
-    pipeline: FastVideoPipeline
-    is_compiled: bool
-
-
-@dataclass
-class PoseResources:
-    pipeline: PoseProcessorPipeline
-    person_detector_model_path: str
-    pose_model_path: str
-
-
-@dataclass
-class ICLoraState:
-    pipeline: IcLoraPipeline
-    lora_path: str
-    depth_pipeline: DepthProcessorPipeline
-    depth_model_path: str
-    pose_resources: PoseResources | None = None
-    conditioning_cache: ConditioningCache = field(default_factory=ConditioningCache)
-
-
-@dataclass
-class A2VPipelineState:
-    pipeline: A2VPipeline
-
-
-@dataclass
-class RetakePipelineState:
-    pipeline: RetakePipeline
-    distilled: bool
-    quantized: bool
-
-
-# ============================================================
-# Generation state
-# ============================================================
-
-
-@dataclass
-class GenerationProgress:
-    phase: str
-    progress: int
-    current_step: int | None
-    total_steps: int | None
-
-
-@dataclass
-class GenerationRunning:
-    id: str
-    progress: GenerationProgress
-
-
-@dataclass
-class GenerationComplete:
-    id: str
-    result: str | list[str]
-
-
-@dataclass
-class GenerationError:
-    id: str
-    error: str
-
-
-@dataclass
-class GenerationCancelled:
-    id: str
-
-
-GenerationState = GenerationRunning | GenerationComplete | GenerationError | GenerationCancelled
-
-
-@dataclass
-class GpuGeneration:
-    state: GenerationState
-
-
-@dataclass
-class ApiGeneration:
-    state: GenerationState
-
-
-ActiveGeneration = GpuGeneration | ApiGeneration
-
-
-# ============================================================
-# Device slots
-# ============================================================
-
-
-@dataclass
-class GpuSlot:
-    active_pipeline: VideoPipelineState | ICLoraState | A2VPipelineState | RetakePipelineState | ImageGenerationPipeline
-
-
-@dataclass
-class CpuSlot:
-    active_pipeline: ImageGenerationPipeline
 
 
 # HuggingFace auth
@@ -226,6 +103,88 @@ HfAuthState = HfNotAuthenticated | HfOAuthPending | HfAuthenticated
 
 
 # ============================================================
+# Training job state
+# ============================================================
+
+
+@dataclass(frozen=True)
+class TrainingJobIdle:
+    """No training job is active."""
+    status: str = "idle"
+
+
+@dataclass(frozen=True)
+class TrainingJobStarting:
+    """A training job is being initialized."""
+    job_id: str
+    project_id: str
+    status: str = "starting"
+
+
+@dataclass(frozen=True)
+class TrainingJobRunning:
+    """A training job is actively running."""
+    job_id: str
+    project_id: str
+    current_step: int
+    total_steps: int
+    current_phase: str | None
+    current_loss: float | None
+    gpu_index: int
+    status: str = "running"
+
+
+@dataclass(frozen=True)
+class TrainingJobPaused:
+    """A training job is paused."""
+    job_id: str
+    project_id: str
+    current_step: int
+    total_steps: int
+    gpu_index: int
+    status: str = "paused"
+
+
+@dataclass(frozen=True)
+class TrainingJobCompleted:
+    """A training job finished successfully."""
+    job_id: str
+    project_id: str
+    total_steps: int
+    final_loss: float | None
+    status: str = "completed"
+
+
+@dataclass(frozen=True)
+class TrainingJobErrored:
+    """A training job failed."""
+    job_id: str
+    project_id: str
+    error_message: str
+    status: str = "errored"
+
+
+@dataclass(frozen=True)
+class TrainingJobCancelled:
+    """A training job was cancelled by the user."""
+    job_id: str
+    project_id: str
+    stopped_at_step: int
+    status: str = "cancelled"
+
+
+TrainingJobState = (
+    TrainingJobIdle
+    | TrainingJobStarting
+    | TrainingJobRunning
+    | TrainingJobPaused
+    | TrainingJobCompleted
+    | TrainingJobErrored
+    | TrainingJobCancelled
+)
+
+
+# ============================================================
 # Top-level state
 # ============================================================
 
@@ -233,9 +192,6 @@ HfAuthState = HfNotAuthenticated | HfOAuthPending | HfAuthenticated
 @dataclass
 class AppState:
     downloading_session: DownloadingSession | None
-    gpu_slot: GpuSlot | None
-    active_generation: ActiveGeneration | None
-    cpu_slot: CpuSlot | None
     text_encoder: TextEncoderState | None
     app_settings: AppSettings
     completed_download_sessions: dict[DownloadSessionId, DownloadSessionResult] = field(

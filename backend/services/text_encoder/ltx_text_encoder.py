@@ -1,17 +1,14 @@
-"""Text encoder patching and API embedding service."""
+"""Text encoder patching service."""
 
 from __future__ import annotations
 
 import logging
-import pickle
-import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 import torch
 
 from services.http_client.http_client import HTTPClient
-from state.app_state_types import TextEncodingResult
 
 if TYPE_CHECKING:
     from state.app_state_types import AppState
@@ -22,10 +19,9 @@ logger = logging.getLogger(__name__)
 class LTXTextEncoder:
     """Stateless text encoding operations with idempotent monkey-patching."""
 
-    def __init__(self, device: torch.device, http: HTTPClient, ltx_api_base_url: str) -> None:
+    def __init__(self, device: torch.device, http: HTTPClient) -> None:
         self.device = device
         self.http = http
-        self.ltx_api_base_url = ltx_api_base_url
         self._prompt_encoder_patched = False
         self._cleanup_memory_patched = False
 
@@ -131,13 +127,6 @@ class LTXTextEncoder:
             original_cleanup_memory = ltx_utils.cleanup_memory
 
             def patched_cleanup_memory() -> None:
-                state = state_getter()
-                te_state = state.text_encoder
-                if te_state is not None and te_state.cached_encoder is not None:
-                    try:
-                        te_state.cached_encoder.to(torch.device("cpu"))
-                    except Exception:
-                        logger.warning("Failed to move cached text encoder to CPU", exc_info=True)
                 original_cleanup_memory()
 
             setattr(ltx_utils, "cleanup_memory", patched_cleanup_memory)
@@ -163,64 +152,6 @@ class LTXTextEncoder:
             logger.info("Installed cleanup_memory patch")
         except Exception as exc:
             logger.warning("Failed to patch cleanup_memory: %s", exc, exc_info=True)
-
-    def get_model_id_from_checkpoint(self, checkpoint_path: str) -> str | None:
-        try:
-            from safetensors import safe_open
-
-            with safe_open(checkpoint_path, framework="pt", device="cpu") as f:
-                metadata = f.metadata()
-                if metadata and "encrypted_wandb_properties" in metadata:
-                    return metadata["encrypted_wandb_properties"]
-        except Exception as exc:
-            logger.warning("Could not extract model_id from checkpoint: %s", exc, exc_info=True)
-        return None
-
-    def encode_via_api(self, prompt: str, api_key: str, checkpoint_path: str, enhance_prompt: bool) -> TextEncodingResult | None:
-        model_id = self.get_model_id_from_checkpoint(checkpoint_path)
-        if not model_id:
-            return None
-
-        try:
-            start = time.time()
-            response = self.http.post(
-                f"{self.ltx_api_base_url}/v1/prompt-embedding",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json_payload={
-                    "prompt": prompt,
-                    "model_id": model_id,
-                    "enhance_prompt": enhance_prompt,
-                },
-                timeout=60,
-            )
-
-            if response.status_code != 200:
-                logger.warning("LTX API error %s: %s", response.status_code, response.text)
-                return None
-
-            conditioning = pickle.loads(response.content)  # noqa: S301
-            if not conditioning or len(conditioning) == 0:
-                logger.warning("LTX API returned unexpected conditioning format")
-                return None
-
-            embeddings = conditioning[0][0]
-            video_dim = 4096
-            if embeddings.shape[-1] > video_dim:
-                video_context = embeddings[..., :video_dim].contiguous().to(dtype=torch.bfloat16, device=self.device)
-                audio_context = embeddings[..., video_dim:].contiguous().to(dtype=torch.bfloat16, device=self.device)
-            else:
-                video_context = embeddings.contiguous().to(dtype=torch.bfloat16, device=self.device)
-                audio_context = None
-
-            logger.info("Text encoded via API in %.1fs", time.time() - start)
-            return TextEncodingResult(video_context=video_context, audio_context=audio_context)
-
-        except Exception as exc:
-            logger.warning("LTX API encoding failed: %s", exc, exc_info=True)
-            return None
 
 
 class DummyTextEncoder:

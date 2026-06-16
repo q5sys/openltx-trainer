@@ -11,7 +11,6 @@ from runtime_config.model_download_specs import (
     ALL_MODEL_CP_IDS,
     ALL_LTX_LOCAL_MODEL_IDS,
     ModelCheckpointSpec,
-    get_ic_loras_cp_ids,
     get_latest_ltx_model_id,
     get_ltx_cps,
     get_ltx_model_cp_ids,
@@ -38,18 +37,12 @@ def test_latest_ltx_model_is_relevant():
     assert spec.model_cp in get_ltx_cps()
 
 
-def test_ic_lora_cp_ids_are_deduped():
-    spec = get_ltx_model_spec(get_latest_ltx_model_id())
-    assert get_ic_loras_cp_ids(spec.ic_loras_spec) == ("ltx-2.3-22b-ic-lora-union-control-ref0.5",)
-
-
-def test_ltx_model_cp_ids_include_deduped_ic_loras():
+def test_ltx_model_cp_ids():
     spec = get_ltx_model_spec(get_latest_ltx_model_id())
     assert get_ltx_model_cp_ids(get_latest_ltx_model_id()) == (
         spec.model_cp,
         spec.upscale_cp,
         spec.text_encoder_cp,
-        "ltx-2.3-22b-ic-lora-union-control-ref0.5",
     )
 
 
@@ -63,12 +56,12 @@ def test_downloading_path_is_derived_from_spec():
     models_dir = Path("/tmp/models")
     downloading_dir = resolve_downloading_dir(models_dir)
 
-    assert resolve_downloading_path(models_dir, "ltx-2.3-22b-distilled") == downloading_dir
+    assert resolve_downloading_path(models_dir, "ltx-2.3-22b-dev") == downloading_dir
     assert (
         resolve_downloading_path(models_dir, "gemma-3-12b-it-qat-q4_0-unquantized")
         == downloading_dir / "gemma-3-12b-it-qat-q4_0-unquantized"
     )
-    assert resolve_downloading_target_path(models_dir, "ltx-2.3-22b-distilled") == downloading_dir / "ltx-2.3-22b-distilled.safetensors"
+    assert resolve_downloading_target_path(models_dir, "ltx-2.3-22b-dev") == downloading_dir / "ltx-2.3-22b-dev.safetensors"
 
 
 def test_relative_paths_are_unique():
@@ -91,4 +84,4 @@ def test_model_path_rejects_parent_traversal(monkeypatch, tmp_path):
     )
 
     with pytest.raises(ValueError):
-        resolve_model_path(tmp_path, "ltx-2.3-22b-distilled")
+        resolve_model_path(tmp_path, "ltx-2.3-22b-dev")

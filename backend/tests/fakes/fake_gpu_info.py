@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from services.interfaces import GpuTelemetryPayload
+from services.interfaces import GpuMemoryPayload, GpuTelemetryPayload
 
 
 class FakeGpuInfo:
@@ -12,9 +12,14 @@ class FakeGpuInfo:
         self.gpu_name: str | None = None
         self.vram_gb: int | None = None
         self.gpu_info: GpuTelemetryPayload = {"name": "Unknown", "vram": 0, "vramUsed": 0}
+        self.gpu_memory: GpuMemoryPayload = {"available": False, "total_mb": 0, "used_mb": 0}
 
     def get_gpu_info(self) -> GpuTelemetryPayload:
         return self.gpu_info
+
+    def get_gpu_memory(self, index: int) -> GpuMemoryPayload:
+        return self.gpu_memory
+
 
     def get_cuda_available(self) -> bool:
         return self.cuda_available

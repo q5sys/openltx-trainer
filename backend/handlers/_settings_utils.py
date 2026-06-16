@@ -74,15 +74,26 @@ def collect_changed_paths(before: JSONValue, after: JSONValue, prefix: str = "")
     return set()
 
 
-def migrate_legacy_settings(raw: Mapping[str, JSONValue]) -> JSONObject:
-    migrated: JSONObject = dict(raw)
-    if (
-        "prompt_enhancer_enabled" in migrated
-        and "prompt_enhancer_enabled_t2v" not in migrated
-    ):
-        legacy_value = bool(migrated["prompt_enhancer_enabled"])
-        migrated.setdefault("prompt_enhancer_enabled_t2v", legacy_value)
-        migrated.setdefault("prompt_enhancer_enabled_i2v", legacy_value)
+_DEPRECATED_KEYS = frozenset({
+    "fast_model",
+    "pro_model",
+    "prompt_cache_size",
+    "prompt_enhancer_enabled",
+    "prompt_enhancer_enabled_t2v",
+    "prompt_enhancer_enabled_i2v",
+    "seed_locked",
+    "locked_seed",
+    "use_local_text_encoder",
+    "models_dir",
+    "ltx_api_key",
+    "fal_api_key",
+})
 
-    migrated.pop("prompt_enhancer_enabled", None)
+
+def migrate_legacy_settings(raw: Mapping[str, JSONValue]) -> JSONObject:
+    """Strip deprecated generation-era keys from legacy settings files."""
+    migrated: JSONObject = {}
+    for key, value in raw.items():
+        if key not in _DEPRECATED_KEYS:
+            migrated[key] = value
     return migrated

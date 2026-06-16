@@ -5,11 +5,12 @@ from __future__ import annotations
 import os
 import signal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 
-from api_types import GpuInfoResponse, HealthResponse
+from api_types import GpuInfoResponse, GpuListResponse, GpuMemoryResponse, HealthResponse
 from state import get_state_service
 from app_handler import AppHandler
+
 
 router = APIRouter(tags=["health"])
 
@@ -22,6 +23,25 @@ def route_health(handler: AppHandler = Depends(get_state_service)) -> HealthResp
 @router.get("/api/gpu-info", response_model=GpuInfoResponse)
 def route_gpu_info(handler: AppHandler = Depends(get_state_service)) -> GpuInfoResponse:
     return handler.health.get_gpu_info()
+
+
+@router.get("/api/gpu-list", response_model=GpuListResponse)
+def route_gpu_list(handler: AppHandler = Depends(get_state_service)) -> GpuListResponse:
+    return handler.health.list_gpus()
+
+
+@router.get("/api/gpu-memory", response_model=GpuMemoryResponse)
+def route_gpu_memory(
+    index: int = Query(default=0, ge=0),
+    handler: AppHandler = Depends(get_state_service),
+) -> GpuMemoryResponse:
+    """Live used / total VRAM (MB) for one GPU index.
+
+    Polled by the Monitor view so the operator can watch VRAM climb,
+    e.g. during sample generation where the run is prone to OOM.
+    """
+    return handler.health.get_gpu_memory(index)
+
 
 
 def _shutdown_process() -> None:

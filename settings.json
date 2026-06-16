@@ -1,16 +1,38 @@
 {
-  "keep_models_loaded": true,
-  "use_torch_compile": false,
-  "load_on_startup": false,
-  "ltx_api_key": "",
-  "fal_api_key": "",
-  "fast_model": {
-    "steps": 8,
-    "use_upscaler": true
+  "default_gpu_index": 0,
+  "model_dirs": {
+    "base_models": "auto",
+    "captioner": "auto",
+    "trained_loras": "auto"
   },
-  "pro_model": {
-    "steps": 20,
-    "use_upscaler": true
+  "training_defaults": {
+    "save_optimizer_state": true,
+    "keep_last_n_checkpoints": 0,
+    "sample_on_save": true,
+    "auto_advance_phases": true,
+    "transformer_quantization": "float8",
+    "text_encoder_quantization": "float8"
   },
-  "prompt_cache_size": 100
+  "captioning_defaults": {
+    "backend": "qwen_vl_local",
+    "model_family": "qwen3-vl",
+    "model_size": "4B",
+    "abliterated": false,
+    "quantization": "fp16",
+    "captioner_idle_timeout_seconds": 300
+  },
+  "captioning_api_keys": {
+    "gemini": "",
+    "openai": "",
+    "anthropic": "",
+    "openai_compatible": {
+      "base_url": "",
+      "api_key": ""
+    }
+  },
+  "verification_defaults": {
+    "default_cfg": 10.0,
+    "default_frames": 49,
+    "default_size": [512, 512]
+  }
 }

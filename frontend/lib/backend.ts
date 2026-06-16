@@ -1,6 +1,6 @@
-let cached: { url: string; token: string } | null = null
+let cached: { url: string; token: string; adminToken: string } | null = null
 
-export async function getBackendCredentials(): Promise<{ url: string; token: string }> {
+export async function getBackendCredentials(): Promise<{ url: string; token: string; adminToken: string }> {
   if (!cached) cached = await window.electronAPI.getBackend()
   return cached
 }
@@ -10,9 +10,10 @@ export function resetBackendCredentials(): void {
 }
 
 export async function backendFetch(path: string, init?: RequestInit): Promise<Response> {
-  const { url, token } = await getBackendCredentials()
+  const { url, token, adminToken } = await getBackendCredentials()
   const headers = new Headers(init?.headers)
   if (token) headers.set('Authorization', `Bearer ${token}`)
+  if (adminToken) headers.set('X-Admin-Token', adminToken)
   return fetch(`${url}${path}`, { ...init, headers })
 }
 

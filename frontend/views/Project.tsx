@@ -1,179 +1,92 @@
-import { useCallback, useEffect, useState } from 'react'
-import { ArrowLeft, Sparkles, Film } from 'lucide-react'
+import { ArrowLeft, Database, Cpu, Activity, CheckCircle } from 'lucide-react'
 import { useProjects } from '../contexts/ProjectContext'
 import { useView } from '../contexts/ViewContext'
-import { LtxLogo } from '../components/LtxLogo'
 import { Button } from '../components/ui/button'
-import { GenSpace } from './GenSpace'
-import { VideoEditor } from './VideoEditor'
-import type { ProjectTab } from '../types/project-model'
-import {
-  hasVisualAssetMetadataForMigration,
-  runVisualAssetMetadataMigration,
-} from '../lib/project-asset-metadata-migration'
+import { DatasetTab } from '../components/Dataset/DatasetTab'
+import { TrainingTab } from '../components/Training/TrainingTab'
+import { MonitorTab } from '../components/Monitor/MonitorTab'
+import { VerifyTab } from '../components/Verify/VerifyTab'
+import type { ProjectTab } from '../types/project'
+
+const TABS: { id: ProjectTab; label: string; icon: React.ReactNode }[] = [
+  { id: 'dataset', label: 'Dataset', icon: <Database className="h-4 w-4" /> },
+  { id: 'training', label: 'Training', icon: <Cpu className="h-4 w-4" /> },
+  { id: 'monitor', label: 'Monitor', icon: <Activity className="h-4 w-4" /> },
+  { id: 'verify', label: 'Verify', icon: <CheckCircle className="h-4 w-4" /> },
+]
+
+function TabPlaceholder({ tab }: { tab: ProjectTab }) {
+  const labels: Record<ProjectTab, string> = {
+    dataset: 'Dataset management: import sources, cut clips, browse and caption your training data.',
+    training: 'Training configuration: select mode, configure hyperparameters, and start training.',
+    monitor: 'Training monitor: view live progress, loss curves, and sample outputs.',
+    verify: 'Verification: test your trained LORA with prompt-based generation.',
+  }
+
+  return (
+    <div className="flex-1 flex items-center justify-center">
+      <div className="text-center max-w-md">
+        <h3 className="text-lg font-medium text-zinc-300 mb-2 capitalize">{tab}</h3>
+        <p className="text-sm text-zinc-500">{labels[tab]}</p>
+        <p className="text-xs text-zinc-600 mt-4">This tab will be implemented in a future step.</p>
+      </div>
+    </div>
+  )
+}
 
 export function Project() {
-  const {
-    activeProject,
-    currentTab,
-    setProject,
-    setCurrentTab,
-    updateAsset,
-    pendingRetakeUpdate,
-    setPendingRetakeUpdate,
-    pendingIcLoraUpdate,
-    setPendingIcLoraUpdate,
-  } = useProjects()
+  const { activeProject, currentTab, setCurrentTab } = useProjects()
   const { goHome } = useView()
-  const [assetMetadataMigrationProgress, setAssetMetadataMigrationProgress] = useState({ running: false, total: 0, completed: 0 })
-  const [upgradePassProjectId, setUpgradePassProjectId] = useState<string | null>(null)
-  const activeProjectId = activeProject?.id ?? null
-  const activeProjectAssets = activeProject?.assets ?? null
-  const needsAssetMetadataMigration = activeProjectAssets
-    ? hasVisualAssetMetadataForMigration(activeProjectAssets)
-    : false
 
-  const handleSaveActiveProject = useCallback((project: typeof activeProject extends null ? never : NonNullable<typeof activeProject>) => {
-    if (!activeProjectId) return
-    setProject(activeProjectId, project)
-  }, [activeProjectId, setProject])
-
-  useEffect(() => {
-    if (!activeProjectId || !activeProjectAssets || !needsAssetMetadataMigration) return
-
-    let cancelled = false
-
-    const runAssetMetadataMigration = async () => {
-      for await (const event of runVisualAssetMetadataMigration(activeProjectAssets, window.electronAPI)) {
-        if (cancelled) return
-
-        if (event.kind === 'progress') {
-          setAssetMetadataMigrationProgress({ running: true, total: event.total, completed: event.completed })
-          continue
-        }
-
-        for (const update of event.updates) {
-          updateAsset(activeProjectId, update.assetId, update.updates)
-        }
-
-        setAssetMetadataMigrationProgress({ running: false, total: 0, completed: 0 })
-        setUpgradePassProjectId(activeProjectId)
-      }
-    }
-
-    void runAssetMetadataMigration()
-
-    return () => {
-      cancelled = true
-    }
-  }, [activeProjectAssets, activeProjectId, needsAssetMetadataMigration, updateAsset])
-
-  useEffect(() => {
-    if (currentTab !== 'video-editor') return
-    if (pendingRetakeUpdate) setPendingRetakeUpdate(null)
-    if (pendingIcLoraUpdate) setPendingIcLoraUpdate(null)
-  }, [
-    currentTab,
-    pendingRetakeUpdate,
-    setPendingRetakeUpdate,
-    pendingIcLoraUpdate,
-    setPendingIcLoraUpdate,
-  ])
-  
   if (!activeProject) {
-    return (
-      <div className="h-screen bg-background flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-zinc-400 mb-4">Project not found</p>
-          <Button onClick={goHome}>Go Home</Button>
-        </div>
-      </div>
-    )
+    return null
   }
-  
-  const tabs: { id: ProjectTab; label: string; icon: React.ReactNode }[] = [
-    { id: 'gen-space', label: 'Gen Space', icon: <Sparkles className="h-4 w-4" /> },
-    { id: 'video-editor', label: 'Video Editor', icon: <Film className="h-4 w-4" /> },
-  ]
-  const shouldShowAssetMetadataMigrationProgressScreen = assetMetadataMigrationProgress.running
-    || (upgradePassProjectId !== activeProjectId && needsAssetMetadataMigration)
 
-  if (shouldShowAssetMetadataMigrationProgressScreen) {
-    const progressPct = assetMetadataMigrationProgress.total > 0
-      ? (assetMetadataMigrationProgress.completed / assetMetadataMigrationProgress.total) * 100
-      : 0
-
-    return (
-      <div className="h-screen bg-background flex items-center justify-center">
-        <div className="w-[360px]">
-          <p className="text-center text-sm text-zinc-300 mb-4">
-            Preparing your project assets...
-          </p>
-          <div className="h-2 w-full rounded-full bg-zinc-800 overflow-hidden">
-            <div
-              className="h-full bg-blue-500 transition-all duration-150"
-              style={{ width: `${Math.max(0, Math.min(100, progressPct))}%` }}
-            />
-          </div>
-        </div>
-      </div>
-    )
-  }
-  
   return (
-    <div className="h-screen bg-background flex flex-col">
+    <div className="flex flex-col h-full bg-zinc-950">
       {/* Header */}
-      <header className="flex items-center px-4 py-3 border-b border-zinc-800">
-        <div className="flex-1 flex items-center gap-4">
-          {/* Back button and logo */}
-          <button 
-            onClick={goHome}
-            className="p-2 rounded-lg hover:bg-zinc-800 transition-colors"
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-zinc-800">
+        <Button variant="ghost" size="sm" onClick={goHome} className="h-8 w-8 p-0">
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
+        <div className="flex-1 min-w-0">
+          <h2 className="text-sm font-medium text-zinc-100 truncate">{activeProject.name}</h2>
+          <p className="text-xs text-zinc-500 capitalize">{activeProject.mode} mode</p>
+        </div>
+      </div>
+
+      {/* Tab bar */}
+      <div className="flex border-b border-zinc-800">
+        {TABS.map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setCurrentTab(tab.id)}
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors border-b-2 ${
+              currentTab === tab.id
+                ? 'border-blue-500 text-blue-400'
+                : 'border-transparent text-zinc-500 hover:text-zinc-300'
+            }`}
           >
-            <ArrowLeft className="h-5 w-5 text-zinc-400" />
+            {tab.icon}
+            {tab.label}
           </button>
-          
-          <LtxLogo className="h-5 w-auto text-white" />
-          
-          {/* Project name */}
-          <span className="text-white font-medium">{activeProject.name}</span>
-        </div>
-        
-        {/* Center - Tabs */}
-        <div className="flex items-center gap-1 bg-zinc-900 rounded-lg p-1">
-          {tabs.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setCurrentTab(tab.id)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                currentTab === tab.id
-                  ? 'bg-zinc-800 text-white'
-                  : 'text-zinc-400 hover:text-white'
-              }`}
-            >
-              {tab.icon}
-              {tab.label}
-            </button>
-          ))}
-        </div>
-        
-        {/* Right spacer - equal to left to keep tabs centered */}
-        <div className="flex-1" />
-      </header>
-      
-      <main className="flex-1 overflow-hidden relative">
-        {currentTab === 'gen-space' ? (
-          <GenSpace />
+        ))}
+      </div>
+
+      {/* Tab content - flex-1 min-h-0 ensures the tab can shrink and scroll */}
+      <div className="flex-1 min-h-0 flex flex-col">
+        {currentTab === 'dataset' ? (
+          <DatasetTab />
+        ) : currentTab === 'training' ? (
+          <TrainingTab />
+        ) : currentTab === 'monitor' ? (
+          <MonitorTab />
+        ) : currentTab === 'verify' ? (
+          <VerifyTab />
         ) : (
-          <VideoEditor
-            key={activeProject.id}
-            currentProject={activeProject}
-            saveProject={handleSaveActiveProject}
-            pendingRetakeUpdate={pendingRetakeUpdate}
-            pendingIcLoraUpdate={pendingIcLoraUpdate}
-          />
+          <TabPlaceholder tab={currentTab} />
         )}
-      </main>
+      </div>
     </div>
   )
 }

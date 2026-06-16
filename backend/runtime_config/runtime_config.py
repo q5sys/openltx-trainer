@@ -17,7 +17,6 @@ class RuntimeConfig:
     default_models_dir: Path
     outputs_dir: Path
     settings_file: Path
-    ltx_api_base_url: str
     local_generations_mode: LocalGenerationMode
     use_sage_attention: bool
     camera_motion_prompts: dict[str, str]
@@ -29,5 +28,5 @@ class RuntimeConfig:
 
     @property
     def force_api_generations(self) -> bool:
-        """Derived: local generation is unavailable for this runtime."""
-        return self.local_generations_mode == "unsupported"
+        """Always false: cloud API generation paths have been removed."""
+        return False

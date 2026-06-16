@@ -41,8 +41,10 @@ class StateHandlerBase:
     @property
     def models_dir(self) -> Path:
         """Effective models dir: custom from settings, or startup default."""
-        custom = self._state.app_settings.models_dir
-        return Path(custom) if custom else self._config.default_models_dir
+        custom = self._state.app_settings.model_dirs.base_models
+        if custom and custom != "auto":
+            return Path(custom)
+        return self._config.default_models_dir
 
 
 def with_state_lock(

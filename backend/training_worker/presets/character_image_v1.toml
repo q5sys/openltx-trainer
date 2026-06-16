@@ -1,0 +1,102 @@
+# Character (Images) Training Preset v1
+# Single-stage workflow for training character LORAs from a still-image
+# dataset on LTX-Video 2.3.
+#
+# The image profile trains at a single latent frame (no temporal
+# replication) and turns on aspect-ratio bucketing, so the resulting LoRA
+# learns appearance / identity only. That LoRA still works for t2v and i2v
+# generation at any clip length because the base model supplies the motion
+# and consumes any first-frame condition; the LoRA only injects appearance
+# into the attention projections.
+#
+# The hyperparameters mirror a proven ai-toolkit LTX-2 image run: rank 32 /
+# alpha 32, lr 1e-4, plain flow-matching MSE (no differential guidance),
+# 8-bit AdamW, EMA decay 0.99. See
+# memory-bank/feature_character_from_images.md and
+# memory-bank/feature_two_profile_training.md.
+
+# Stage F low-VRAM controls (top-level so they bind to TrainingConfig
+# fields). Defaults reproduce the 32 GB baseline: no quantization, no block
+# swap, no gradient checkpointing. Smaller cards are configured by the
+# "Auto-tune for my GPU" button in the Training tab.
+low_vram_mode = "off"
+blocks_resident_on_gpu = 0
+gradient_checkpointing = false
+
+base_lora_alpha_equals_rank = true
+cache_text_embeddings = true
+save_optimizer_state = true
+
+# EMA of the LoRA weights. The ai-toolkit image run used decay 0.99 (the
+# video presets use 0.999). The smoothed shadow is exported and previewed;
+# the optimizer state is always saved from the true live weights so resume
+# is unaffected.
+use_ema = true
+ema_decay = 0.99
+
+# Dynamic, sequence-length-aware sigma shift. A single image frame is a
+# short packed sequence, so the schedule stays close to the static shift.
+use_dynamic_shift = true
+
+# Image training profile (see memory-bank/feature_two_profile_training.md).
+# Forces target_frames = 1 and aspect bucketing on regardless of the
+# [dataset] values below.
+profile = "image"
+
+# Single-stage schedule. Image training does not need the 4-phase
+# rank-down / differential-guidance recipe the video character preset uses;
+# the ai-toolkit reference trains one stage at a fixed rank with plain
+# flow-matching MSE. Raise ends_at_step for a longer run.
+[phases.phase1_capture]
+display_name = "Phase 1: Capture"
+ends_at_step = 6000
+lora_rank = 32
+learning_rate = 1e-4
+gradient_accumulation = 1
+# Plain flow-matching MSE. ai-toolkit image runs do not use differential
+# guidance or diff output preservation.
+differential_guidance = 0.0
+timestep_bias = "none"
+save_every_n_steps = 200
+
+[dataset]
+# target_frames is forced to 1 by the image profile; the value here is
+# ignored. Images train at a higher spatial resolution than the 512 video
+# default because a single latent frame is far cheaper; lower this on
+# memory-constrained cards.
+target_frames = 1
+target_resolution = [1024, 1024]
+# Dataset repeats (ai-toolkit num_repeats). auto_repeats derives the count
+# from the dataset size (<=30 images -> 4, <=70 -> 2, else 1), targeting
+# ~100 image instances per epoch so a small set still reaches the step
+# budget. Set auto_repeats = false and num_repeats = N to pin a count.
+auto_repeats = true
+num_repeats = 1
+
+# Sampling cadence is a single global knob. Each sample runs one preview
+# inference every time the step counter crosses sample_every_n_steps.
+# num_inference_steps, num_frames, and guidance_scale are shared; each
+# sample owns its own prompt + resolution. Previews are short videos even
+# for an image-trained LoRA because the base model supplies the motion.
+[sampling]
+# 30 steps is the LTX-2 reference inference floor; 24 left previews soft.
+num_inference_steps = 30
+# 25 (a valid LTX 8k+1 length) keeps the denoise-activation and VAE-decode
+# peak low so previews do not OOM on smaller cards.
+num_frames = 25
+# Preview CFG = 3.0 to match the LTX-2 reference inference paths. Higher
+# values "deep-fry" the preview (oversaturated, crushed detail) and make a
+# good LoRA look broken in-app. Preview-only knob; it does not affect the
+# exported LoRA.
+guidance_scale = 3.0
+sample_every_n_steps = 200
+
+[[sampling.samples]]
+prompt = "{trigger} talking to the camera in a well-lit room"
+width = 512
+height = 512
+
+[[sampling.samples]]
+prompt = "{trigger} walking through a park on a sunny day"
+width = 512
+height = 512

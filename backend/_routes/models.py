@@ -9,8 +9,6 @@ from api_types import (
     CheckModelAccessRequest,
     CheckModelAccessResponse,
     DownloadProgressResponse,
-    ImageGenRecommendationResponse,
-    LtxIcLoraRecommendationResponse,
     LtxRecommendationResponse,
     ModelDeleteRequest,
     ModelDownloadRequest,
@@ -27,18 +25,6 @@ router = APIRouter(prefix="/api", tags=["models"])
 @router.get("/models/ltx-recommendation", response_model=LtxRecommendationResponse)
 def route_ltx_recommendation(handler: AppHandler = Depends(get_state_service)) -> LtxRecommendationResponse:
     return handler.models.get_ltx_recommendation()
-
-
-@router.get("/models/img-gen-recommendation", response_model=ImageGenRecommendationResponse)
-def route_img_gen_recommendation(handler: AppHandler = Depends(get_state_service)) -> ImageGenRecommendationResponse:
-    return handler.models.get_img_gen_recommendation()
-
-
-@router.get("/models/ltx-ic-lora-recommendation", response_model=LtxIcLoraRecommendationResponse)
-def route_ltx_ic_lora_recommendation(
-    handler: AppHandler = Depends(get_state_service),
-) -> LtxIcLoraRecommendationResponse:
-    return handler.models.get_ltx_ic_lora_recommendation()
 
 
 @router.get("/models/text-encoder-recommendation", response_model=TextEncoderRecommendationResponse)

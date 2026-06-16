@@ -1,6 +1,6 @@
-# LTX Desktop - Installer Build Guide
+# OpenLTX Trainer - Installer Build Guide
 
-This guide explains how to build a distributable installer for **LTX Desktop**.
+This guide explains how to build a distributable installer for **OpenLTX Trainer**.
 
 - For running from source and debugging: see [`README.md`](../README.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md).
 - For end-user requirements and first-run behavior: see [`README.md`](../README.md).
@@ -12,12 +12,16 @@ The installer includes:
 - **Embedded Python** (version from [`backend/.python-version`](../backend/.python-version)) with all dependencies pre-installed:
   - PyTorch (CUDA on Windows/Linux, MPS on macOS)
   - FastAPI, Diffusers, Transformers
-  - LTX-2 inference packages
+  - LORA training and inference packages
   - All other required libraries
 - **Backend Python code**
 
 **NOT bundled** (downloaded at runtime):
-- Model weights (downloaded on first run; can be large) from Hugging Face
+- Model weights (downloaded on first run; can be large) from Hugging Face:
+  - LTX-2.3 transformer (~43GB)
+  - Spatial upscaler (~1.9GB)
+  - Gemma text encoder (~25GB)
+  - Qwen3-VL captioning model (~9.2GB, optional, downloaded on first captioning use)
 - On **Linux** and **Windows**: the Python environment itself is downloaded on first launch (keeps installer small)
 
 The embedded Python is **fully isolated** from the target system's Python — it lives inside `{install_dir}/resources/python/` and never modifies system settings.

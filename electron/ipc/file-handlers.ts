@@ -6,8 +6,6 @@ import { logger } from '../logger'
 import { getMainWindow } from '../window'
 import { validatePath, approvePath } from '../path-validation'
 import { getProjectAssetsPath, setProjectAssetsPath } from '../app-state'
-import { extractVideoFrameToFile, getVideoDimensions } from '../export/ffmpeg-utils'
-import { createDownsampledThumbnail, getImageDimensions, getThumbnailPaths } from './image-utils'
 import { handle } from './typed-handle'
 
 const MIME_TYPES: Record<string, string> = {
@@ -64,92 +62,6 @@ function searchDirectoryForFilesImpl(dir: string, filenames: string[]): Record<s
 
   walk(dir, 0)
   return results
-}
-
-function resolveLocalSourcePath(srcPath: string): string {
-  if (!srcPath || !srcPath.trim()) {
-    throw new Error('Source path is empty')
-  }
-
-  const normalized = srcPath.trim()
-
-  if (!path.isAbsolute(normalized)) {
-    throw new Error(`Source path must be absolute: ${srcPath}`)
-  }
-
-  const resolved = path.resolve(normalized)
-  if (!fs.existsSync(resolved)) {
-    throw new Error(`Source file does not exist: ${resolved}`)
-  }
-  if (!fs.statSync(resolved).isFile()) {
-    throw new Error(`Source path is not a file: ${resolved}`)
-  }
-  return resolved
-}
-
-function getUniqueDestinationPath(destDir: string, fileName: string): string {
-  const parsed = path.parse(fileName)
-  let candidate = path.join(destDir, fileName)
-  let idx = 1
-  while (fs.existsSync(candidate)) {
-    candidate = path.join(destDir, `${parsed.name}(${idx})${parsed.ext}`)
-    idx += 1
-  }
-  return candidate
-}
-
-function copyToProjectAssetDirectory(srcPath: string, projectId: string): string {
-  const assetsRoot = getProjectAssetsPath()
-  const destDir = path.join(assetsRoot, projectId)
-  fs.mkdirSync(destDir, { recursive: true })
-  const fileName = path.basename(srcPath)
-  const destPath = getUniqueDestinationPath(destDir, fileName)
-  fs.copyFileSync(srcPath, destPath)
-  return destPath
-}
-
-function createVideoBigThumbnail(videoPath: string, bigThumbnailPath: string): void {
-  extractVideoFrameToFile({
-    videoPath,
-    seekTime: 0,
-    outputPath: bigThumbnailPath,
-    timeoutMs: 30000,
-  })
-}
-
-function createVisualThumbnails(assetPath: string, type: 'video' | 'image'): { bigThumbnailPath: string; smallThumbnailPath: string } {
-  const { bigThumbnailPath: generatedBigThumbnailPath, smallThumbnailPath } = getThumbnailPaths(assetPath)
-  let bigThumbnailPath: string
-
-  switch (type) {
-    case 'video':
-      bigThumbnailPath = generatedBigThumbnailPath
-      createVideoBigThumbnail(assetPath, bigThumbnailPath)
-      break
-    case 'image':
-      bigThumbnailPath = assetPath
-      break
-    default: {
-      const unsupportedType: never = type
-      throw new Error(`Unsupported visual asset type: ${unsupportedType}`)
-    }
-  }
-
-  createDownsampledThumbnail(bigThumbnailPath, smallThumbnailPath)
-  return { bigThumbnailPath, smallThumbnailPath }
-}
-
-function getVisualAssetDimensions(assetPath: string, type: 'video' | 'image'): { width: number; height: number } {
-  switch (type) {
-    case 'video':
-      return getVideoDimensions(assetPath)
-    case 'image':
-      return getImageDimensions(assetPath)
-    default: {
-      const unsupportedType: never = type
-      throw new Error(`Unsupported visual asset type: ${unsupportedType}`)
-    }
-  }
 }
 
 export function registerFileHandlers(): void {
@@ -278,70 +190,6 @@ export function registerFileHandlers(): void {
     return searchDirectoryForFilesImpl(directory, filenames)
   })
 
-  handle('addVisualAssetToProject', ({ srcPath, projectId, type }) => {
-    try {
-      const resolvedSrc = resolveLocalSourcePath(srcPath)
-      const destPath = copyToProjectAssetDirectory(resolvedSrc, projectId)
-      const { bigThumbnailPath, smallThumbnailPath } = createVisualThumbnails(destPath, type)
-      const { width, height } = getVisualAssetDimensions(destPath, type)
-
-      return {
-        success: true,
-        path: destPath,
-        bigThumbnailPath,
-        smallThumbnailPath,
-        width,
-        height,
-      }
-    } catch (error) {
-      logger.error(`Error adding asset to project: ${error}`)
-      return { success: false, error: String(error) }
-    }
-  })
-
-  handle('addGenericAssetToProject', ({ srcPath, projectId }) => {
-    try {
-      const resolvedSrc = resolveLocalSourcePath(srcPath)
-      const destPath = copyToProjectAssetDirectory(resolvedSrc, projectId)
-      return { success: true, path: destPath }
-    } catch (error) {
-      logger.error(`Error copying file to project assets: ${error}`)
-      return { success: false, error: String(error) }
-    }
-  })
-
-  handle('makeThumbnailsForProjectAsset', ({ path: assetPath, type }) => {
-    try {
-      const resolvedAssetPath = resolveLocalSourcePath(assetPath)
-      const { bigThumbnailPath, smallThumbnailPath } = createVisualThumbnails(resolvedAssetPath, type)
-
-      return {
-        success: true,
-        bigThumbnailPath,
-        smallThumbnailPath,
-      }
-    } catch (error) {
-      logger.error(`Error creating thumbnails for project asset: ${error}`)
-      return { success: false, error: String(error) }
-    }
-  })
-
-  handle('makeDimensionsForProjectAsset', ({ path: assetPath, type }) => {
-    try {
-      const resolvedAssetPath = resolveLocalSourcePath(assetPath)
-      const { width, height } = getVisualAssetDimensions(resolvedAssetPath, type)
-
-      return {
-        success: true,
-        width,
-        height,
-      }
-    } catch (error) {
-      logger.error(`Error creating dimensions for project asset: ${error}`)
-      return { success: false, error: String(error) }
-    }
-  })
-
   handle('getProjectAssetsPath', () => {
     return getProjectAssetsPath()
   })
@@ -391,6 +239,48 @@ export function registerFileHandlers(): void {
       approvePath(fp)
     }
     return result.filePaths
+  })
+
+  // Dataset source import (video/image files with multiSelections)
+  handle('addDatasetSource', async ({ title, filters }) => {
+    const mainWindow = getMainWindow()
+    if (!mainWindow) return null
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: title || 'Add Dataset Sources',
+      filters: filters || [
+        { name: 'Video Files', extensions: ['mp4', 'mov', 'avi', 'mkv', 'webm'] },
+        { name: 'Image Files', extensions: ['jpg', 'jpeg', 'png', 'webp', 'bmp'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+      properties: ['openFile', 'multiSelections'],
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    for (const fp of result.filePaths) {
+      approvePath(fp)
+    }
+    return result.filePaths
+  })
+
+  // LORA export: save dialog for LORA checkpoint
+  handle('showSaveLoraDialog', async ({ defaultName }) => {
+    const mainWindow = getMainWindow()
+    if (!mainWindow) return null
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: 'Export LORA',
+      defaultPath: defaultName || 'lora.safetensors',
+      filters: [
+        { name: 'SafeTensors', extensions: ['safetensors'] },
+      ],
+    })
+    if (result.canceled || !result.filePath) return null
+    approvePath(result.filePath)
+    return result.filePath
+  })
+
+  // Reveal a checkpoint file in the system file manager
+  handle('revealCheckpoint', async ({ filePath }) => {
+    const { shell } = await import('electron')
+    shell.showItemInFolder(filePath)
   })
 
 }

@@ -8,9 +8,7 @@ from typing import TYPE_CHECKING
 
 from _routes._errors import HTTPError
 from api_types import (
-    ImageGenRecommendationResponse,
     LtxDownloadRecommendationResponse,
-    LtxIcLoraRecommendationResponse,
     LtxOkRecommendationResponse,
     LtxRecommendationResponse,
     LtxUpgradeRecommendationResponse,
@@ -21,11 +19,8 @@ from api_types import (
 from handlers.base import StateHandlerBase
 from runtime_config.model_download_specs import (
     ALL_MODEL_CP_IDS,
-    DEPTH_PROCESSOR_CP_ID,
-    IMG_GEN_MODEL_CP_ID,
     LTXLocalModelRelevant,
     get_downloaded_ltx_model_id,
-    get_ic_loras_cp_ids,
     get_latest_ltx_model_id,
     get_ltx_cps,
     get_ltx_model_cp_ids,
@@ -67,9 +62,6 @@ class ModelsHandler(StateHandlerBase):
     def _current_downloaded_ltx_model_id(self) -> LTXLocalModelId | None:
         return get_downloaded_ltx_model_id(self.models_dir)
 
-    def _has_api_key(self) -> bool:
-        return bool(self.state.app_settings.ltx_api_key.strip())
-
     def is_cp_downloaded(self, cp_id: ModelCheckpointID) -> bool:
         return is_cp_downloaded(self.models_dir, cp_id)
 
@@ -78,9 +70,7 @@ class ModelsHandler(StateHandlerBase):
 
     def _get_required_ltx_cp_ids(self, model_id: LTXLocalModelId) -> set[ModelCheckpointID]:
         spec = get_ltx_model_spec(model_id)
-        required: set[ModelCheckpointID] = {spec.model_cp, spec.upscale_cp}
-        if not self._has_api_key():
-            required.add(spec.text_encoder_cp)
+        required: set[ModelCheckpointID] = {spec.model_cp, spec.upscale_cp, spec.text_encoder_cp}
         return required
 
     def _get_missing_cp_ids(self, cp_ids: set[ModelCheckpointID]) -> set[ModelCheckpointID]:
@@ -114,21 +104,6 @@ class ModelsHandler(StateHandlerBase):
             and not self.is_cp_downloaded(target_spec.text_encoder_cp)
         ):
             cp_ids.add(target_spec.text_encoder_cp)
-
-        current_ic_loras_spec = current_spec.ic_loras_spec
-        target_ic_loras_spec = target_spec.ic_loras_spec
-        ic_lora_pairs: tuple[tuple[ModelCheckpointID, ModelCheckpointID], ...] = (
-            (current_ic_loras_spec.depth_cp, target_ic_loras_spec.depth_cp),
-            (current_ic_loras_spec.canny_cp, target_ic_loras_spec.canny_cp),
-            (current_ic_loras_spec.pose_cp, target_ic_loras_spec.pose_cp),
-        )
-        for current_cp_id, target_cp_id in ic_lora_pairs:
-            if (
-                current_cp_id != target_cp_id
-                and self.is_cp_downloaded(current_cp_id)
-                and not self.is_cp_downloaded(target_cp_id)
-            ):
-                cp_ids.add(target_cp_id)
 
         return cp_ids
 
@@ -179,25 +154,11 @@ class ModelsHandler(StateHandlerBase):
             cps_to_delete=cps_to_delete,
         )
 
-    def get_img_gen_recommendation(self) -> ImageGenRecommendationResponse:
-        self._ensure_local_model_mode()
-        cp_to_download = None if self.is_cp_downloaded(IMG_GEN_MODEL_CP_ID) else IMG_GEN_MODEL_CP_ID
-        return ImageGenRecommendationResponse(cp_to_download=cp_to_download)
-
     def _require_downloaded_ltx_model_id(self) -> LTXLocalModelId:
         model_id = self._current_downloaded_ltx_model_id()
         if model_id is None:
             raise HTTPError(409, "NO_DOWNLOADED_LTX_MODEL")
         return model_id
-
-    def get_ltx_ic_lora_recommendation(self) -> LtxIcLoraRecommendationResponse:
-        self._ensure_local_model_mode()
-        model_id = self._require_downloaded_ltx_model_id()
-        spec = get_ltx_model_spec(model_id)
-        required_cp_ids: set[ModelCheckpointID] = set(get_ic_loras_cp_ids(spec.ic_loras_spec))
-        required_cp_ids.add(DEPTH_PROCESSOR_CP_ID)
-        cp_ids = self._get_missing_cp_ids(required_cp_ids)
-        return LtxIcLoraRecommendationResponse(cps_to_download=self._ordered_cp_ids(cp_ids))
 
     def get_text_encoder_recommendation(self) -> TextEncoderRecommendationResponse:
         self._ensure_local_model_mode()

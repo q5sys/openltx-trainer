@@ -1,6 +1,6 @@
-appId: com.lightricks.ltx-desktop
-productName: LTX Desktop
-copyright: Copyright © 2026 Lightricks
+appId: com.q5sys.openltx-trainer
+productName: OpenLTX Trainer
+copyright: Copyright © 2026 q5sys
 
 directories:
   output: release
@@ -55,7 +55,7 @@ nsis:
   installerHeaderIcon: resources/icon.ico
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: LTX Desktop
+  shortcutName: OpenLTX Trainer
 
 mac:
   hardenedRuntime: true
@@ -117,5 +117,5 @@ deb:
 
 publish:
   provider: github
-  owner: Lightricks
-  repo: ltx-desktop
+  owner: q5sys
+  repo: LTX-Desktop-LORA-Trainer

@@ -19,9 +19,7 @@ router = APIRouter(prefix="/api", tags=["settings"])
 
 @router.get("/settings", response_model=SettingsResponse)
 def route_get_settings(handler: AppHandler = Depends(get_state_service)) -> SettingsResponse:
-    response = to_settings_response(handler.settings.get_settings_snapshot())
-    response.models_dir = str(handler.settings.models_dir)
-    return response
+    return to_settings_response(handler.settings.get_settings_snapshot())
 
 
 @router.post("/settings", response_model=StatusResponse)
@@ -31,7 +29,7 @@ def route_post_settings(
     handler: AppHandler = Depends(get_state_service),
 ) -> StatusResponse:
     patch_data = req.model_dump(exclude_unset=True)
-    if "models_dir" in patch_data or "modelsDir" in patch_data:
+    if "model_dirs" in patch_data or "modelDirs" in patch_data:
         guard_admin_permission(request)
 
     _, _after, changed_paths = handler.settings.update_settings(req)

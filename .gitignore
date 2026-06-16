@@ -87,3 +87,11 @@ python-embed/
 
 # Downloaded during CI for Windows NSIS installer
 resources/vc_redist.x64.exe
+
+
+backend/.stage-e-runs/
+backend/.stage-f-runs/
+
+# Python test cache
+backend/.pytest_cache/
+.pytest_cache/

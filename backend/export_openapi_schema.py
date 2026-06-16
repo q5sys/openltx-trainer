@@ -18,7 +18,6 @@ from app_handler import ServiceBundle
 from runtime_config.port_constant import PORT
 from state import RuntimeConfig, build_initial_state
 from state.app_settings import AppSettings
-from tests.fake_camera_motion_prompts import FAKE_CAMERA_MOTION_PROMPTS
 from tests.fakes.services import FakeServices
 import torch
 
@@ -41,10 +40,9 @@ def _build_schema() -> dict[str, object]:
             default_models_dir=default_models_dir,
             outputs_dir=outputs_dir,
             settings_file=app_data / "settings.json",
-            ltx_api_base_url="https://api.ltx.video",
             local_generations_mode="full_models_loading",
             use_sage_attention=False,
-            camera_motion_prompts=FAKE_CAMERA_MOTION_PROMPTS,
+            camera_motion_prompts={},
             default_negative_prompt=DEFAULT_NEGATIVE_PROMPT,
             dev_mode=False,
             hf_oauth_client_id="test-client-id",
@@ -60,15 +58,10 @@ def _build_schema() -> dict[str, object]:
             video_processor=cast(Any, fake.video_processor),
             text_encoder=cast(Any, fake.text_encoder),
             task_runner=cast(Any, fake.task_runner),
-            ltx_api_client=cast(Any, fake.ltx_api_client),
-            zit_api_client=cast(Any, fake.zit_api_client),
-            fast_video_pipeline_class=cast(Any, type(fake.fast_video_pipeline)),
-            image_generation_pipeline_class=cast(Any, type(fake.image_generation_pipeline)),
-            ic_lora_pipeline_class=cast(Any, type(fake.ic_lora_pipeline)),
-            depth_processor_pipeline_class=cast(Any, type(fake.depth_processor_pipeline)),
-            pose_processor_pipeline_class=cast(Any, type(fake.pose_processor_pipeline)),
-            a2v_pipeline_class=cast(Any, type(fake.a2v_pipeline)),
-            retake_pipeline_class=cast(Any, type(fake.retake_pipeline)),
+            dataset_pipeline=cast(Any, fake.dataset_pipeline),
+            caption_pipeline=cast(Any, fake.caption_pipeline),
+            training_supervisor=cast(Any, fake.training_supervisor),
+            verification_pipeline=cast(Any, fake.verification_pipeline),
         )
 
         handler = build_initial_state(config, AppSettings(), service_bundle=bundle)

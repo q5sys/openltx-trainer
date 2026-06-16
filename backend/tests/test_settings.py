@@ -18,36 +18,32 @@ class TestGetSettings:
         assert r.status_code == 200
         data = r.json()
         assert data["useTorchCompile"] is False
-        assert data["hasLtxApiKey"] is False
-        assert data["userPrefersLtxApiVideoGenerations"] is False
-        assert data["hasFalApiKey"] is False
-        assert data["useLocalTextEncoder"] is False
-        assert data["promptCacheSize"] == 100
-        assert data["promptEnhancerEnabledT2V"] is True
-        assert data["promptEnhancerEnabledI2V"] is False
-        assert data["hasGeminiApiKey"] is False
-        assert data["seedLocked"] is False
-        assert data["lockedSeed"] == 42
-        # When no custom path is set, the response surfaces the runtime default
-        # so the first-run UI can show the install location.
-        assert data["modelsDir"] == str(test_state.config.default_models_dir)
-        assert "fastModel" not in data
-        assert "proModel" not in data
-        assert "ltxApiKey" not in data
-        assert "falApiKey" not in data
-        assert "geminiApiKey" not in data
+        assert data["keepModelsLoaded"] is True
+        assert data["loadOnStartup"] is False
+        assert data["defaultGpuIndex"] == 0
+        assert data["modelDirs"]["baseModels"] == "auto"
+        assert data["trainingDefaults"]["saveOptimizerState"] is True
+        assert data["captioningDefaults"]["backend"] == "qwen_vl_local"
+        assert data["verificationDefaults"]["defaultCfg"] == 10.0
+
+    def test_api_keys_are_masked(self, client, test_state):
+        test_state.state.app_settings.captioning_api_keys.gemini = "sk-test-key-12345678"
+        r = client.get("/api/settings")
+        data = r.json()
+        masked = data["captioningApiKeys"]["gemini"]
+        assert masked.endswith("5678")
+        assert masked.startswith("*")
+        assert "sk-test" not in masked
+
+    def test_empty_api_keys_stay_empty(self, client, test_state):
+        r = client.get("/api/settings")
+        data = r.json()
+        assert data["captioningApiKeys"]["gemini"] == ""
 
     def test_reflects_changed_settings(self, client, test_state):
         test_state.state.app_settings.use_torch_compile = True
         r = client.get("/api/settings")
         assert r.json()["useTorchCompile"] is True
-
-    def test_has_api_key_true_when_set(self, client, test_state):
-        test_state.state.app_settings.ltx_api_key = "test-key-123"
-        r = client.get("/api/settings")
-        data = r.json()
-        assert data["hasLtxApiKey"] is True
-        assert "ltxApiKey" not in data
 
 
 class TestPostSettings:
@@ -56,96 +52,58 @@ class TestPostSettings:
         assert r.status_code == 200
         assert test_state.state.app_settings.use_torch_compile is True
 
-    def test_update_multiple_fields(self, client, test_state):
-        r = client.post("/api/settings", json={"useTorchCompile": True, "promptCacheSize": 42})
+    def test_update_nested_field(self, client, test_state):
+        r = client.post("/api/settings", json={
+            "trainingDefaults": {"saveOptimizerState": False}
+        })
         assert r.status_code == 200
-        assert test_state.state.app_settings.use_torch_compile is True
-        assert test_state.state.app_settings.prompt_cache_size == 42
+        assert test_state.state.app_settings.training_defaults.save_optimizer_state is False
 
-    def test_prompt_cache_size_clamped_max(self, client, test_state):
-        r = client.post("/api/settings", json={"promptCacheSize": 5000})
+    def test_update_api_key(self, client, test_state):
+        r = client.post("/api/settings", json={
+            "captioningApiKeys": {"gemini": "test-key-abc"}
+        })
         assert r.status_code == 200
-        assert test_state.state.app_settings.prompt_cache_size <= 1000
+        assert test_state.state.app_settings.captioning_api_keys.gemini == "test-key-abc"
 
-    def test_prompt_cache_size_clamped_min(self, client, test_state):
-        r = client.post("/api/settings", json={"promptCacheSize": -10})
+    def test_gpu_index_clamped(self, client, test_state):
+        r = client.post("/api/settings", json={"defaultGpuIndex": 99})
         assert r.status_code == 200
-        assert test_state.state.app_settings.prompt_cache_size >= 0
+        assert test_state.state.app_settings.default_gpu_index <= 15
 
-    def test_locked_seed_clamped_range(self, client, test_state):
-        r = client.post("/api/settings", json={"lockedSeed": 9_999_999_999})
+    def test_verification_cfg_clamped(self, client, test_state):
+        r = client.post("/api/settings", json={
+            "verificationDefaults": {"defaultCfg": 100.0}
+        })
         assert r.status_code == 200
-        assert test_state.state.app_settings.locked_seed == 2_147_483_647
-
-    def test_prompt_cache_shrinks_cache(self, client, test_state):
-        te = test_state.state.text_encoder
-        assert te is not None
-        for i in range(5):
-            te.prompt_cache[(f"key_{i}", False)] = f"value_{i}"  # type: ignore[assignment]
-
-        r = client.post("/api/settings", json={"promptCacheSize": 2})
-        assert r.status_code == 200
-        assert len(te.prompt_cache) <= 2
-
-    def test_update_api_keys(self, client, test_state):
-        r = client.post(
-            "/api/settings",
-            json={
-                "ltxApiKey": "ltx-key-abc",
-                "geminiApiKey": "gemini-key-xyz",
-                "falApiKey": "fal-key-123",
-            },
-        )
-        assert r.status_code == 200
-        assert test_state.state.app_settings.ltx_api_key == "ltx-key-abc"
-        assert test_state.state.app_settings.gemini_api_key == "gemini-key-xyz"
-        assert test_state.state.app_settings.fal_api_key == "fal-key-123"
-
-    def test_update_user_prefers_api_video_generations(self, client, test_state):
-        r = client.post("/api/settings", json={"userPrefersLtxApiVideoGenerations": True})
-        assert r.status_code == 200
-        assert test_state.state.app_settings.user_prefers_ltx_api_video_generations is True
-
-    def test_empty_string_does_not_erase_key(self, client, test_state):
-        test_state.state.app_settings.ltx_api_key = "real-key"
-        test_state.state.app_settings.fal_api_key = "fal-key"
-        r = client.post("/api/settings", json={"ltxApiKey": "", "falApiKey": ""})
-        assert r.status_code == 200
-        assert test_state.state.app_settings.ltx_api_key == "real-key"
-        assert test_state.state.app_settings.fal_api_key == "fal-key"
-
-    def test_omitted_key_does_not_erase_key(self, client, test_state):
-        test_state.state.app_settings.ltx_api_key = "real-key"
-        r = client.post("/api/settings", json={"useTorchCompile": True})
-        assert r.status_code == 200
-        assert test_state.state.app_settings.ltx_api_key == "real-key"
+        assert test_state.state.app_settings.verification_defaults.default_cfg <= 30.0
 
     def test_unknown_field_rejected(self, client):
         r = client.post("/api/settings", json={"unknownSetting": True})
         assert r.status_code == 422
 
 
-class TestModelsDirAdminGuard:
-    def test_models_dir_requires_admin_token(self, client, test_state):
-        r = client.post("/api/settings", json={"modelsDir": "/tmp/new-models"})
+class TestModelDirsAdminGuard:
+    def test_model_dirs_requires_admin_token(self, client, test_state):
+        r = client.post("/api/settings", json={"modelDirs": {"baseModels": "/tmp/new-models"}})
         assert r.status_code == 403
 
-    def test_models_dir_with_wrong_admin_token(self, client, test_state):
+    def test_model_dirs_with_wrong_admin_token(self, client, test_state):
         r = client.post(
             "/api/settings",
-            json={"modelsDir": "/tmp/new-models"},
+            json={"modelDirs": {"baseModels": "/tmp/new-models"}},
             headers={"X-Admin-Token": "wrong-token"},
         )
         assert r.status_code == 403
 
-    def test_models_dir_with_valid_admin_token(self, client, test_state):
+    def test_model_dirs_with_valid_admin_token(self, client, test_state):
         r = client.post(
             "/api/settings",
-            json={"modelsDir": "/tmp/new-models"},
+            json={"modelDirs": {"baseModels": "/tmp/new-models"}},
             headers={"X-Admin-Token": TEST_ADMIN_TOKEN},
         )
         assert r.status_code == 200
-        assert test_state.state.app_settings.models_dir == "/tmp/new-models"
+        assert test_state.state.app_settings.model_dirs.base_models == "/tmp/new-models"
 
     def test_non_admin_fields_without_admin_token(self, client, test_state):
         r = client.post("/api/settings", json={"useTorchCompile": True})
@@ -153,17 +111,17 @@ class TestModelsDirAdminGuard:
         assert test_state.state.app_settings.use_torch_compile is True
 
     def test_effective_models_dir_uses_custom(self, client, test_state):
-        test_state.state.app_settings.models_dir = "/custom/models"
+        test_state.state.app_settings.model_dirs.base_models = "/custom/models"
         assert test_state.models.models_dir == Path("/custom/models")
 
     def test_effective_models_dir_fallback(self, client, test_state):
-        assert test_state.state.app_settings.models_dir == ""
+        assert test_state.state.app_settings.model_dirs.base_models == "auto"
         assert test_state.models.models_dir == test_state.config.default_models_dir
 
-    def test_models_dir_persists_and_loads(self, client, test_state, default_app_settings):
+    def test_model_dirs_persists_and_loads(self, client, test_state, default_app_settings):
         r = client.post(
             "/api/settings",
-            json={"modelsDir": "/tmp/persisted-models"},
+            json={"modelDirs": {"baseModels": "/tmp/persisted-models"}},
             headers={"X-Admin-Token": TEST_ADMIN_TOKEN},
         )
         assert r.status_code == 200
@@ -177,18 +135,13 @@ class TestModelsDirAdminGuard:
             video_processor=fake_services.video_processor,
             text_encoder=fake_services.text_encoder,
             task_runner=fake_services.task_runner,
-            ltx_api_client=fake_services.ltx_api_client,
-            zit_api_client=fake_services.zit_api_client,
-            fast_video_pipeline_class=type(fake_services.fast_video_pipeline),
-            image_generation_pipeline_class=type(fake_services.image_generation_pipeline),
-            ic_lora_pipeline_class=type(fake_services.ic_lora_pipeline),
-            depth_processor_pipeline_class=type(fake_services.depth_processor_pipeline),
-            pose_processor_pipeline_class=type(fake_services.pose_processor_pipeline),
-            a2v_pipeline_class=type(fake_services.a2v_pipeline),
-            retake_pipeline_class=type(fake_services.retake_pipeline),
+            dataset_pipeline=fake_services.dataset_pipeline,
+            caption_pipeline=fake_services.caption_pipeline,
+            training_supervisor=fake_services.training_supervisor,
+            verification_pipeline=fake_services.verification_pipeline,
         )
         loaded = build_initial_state(test_state.config, default_app_settings.model_copy(deep=True), service_bundle=bundle)
-        assert loaded.state.app_settings.models_dir == "/tmp/persisted-models"
+        assert loaded.state.app_settings.model_dirs.base_models == "/tmp/persisted-models"
         assert loaded.models.models_dir == Path("/tmp/persisted-models")
 
 
@@ -203,19 +156,14 @@ class TestSettingsPersistence:
             video_processor=fake_services.video_processor,
             text_encoder=fake_services.text_encoder,
             task_runner=fake_services.task_runner,
-            ltx_api_client=fake_services.ltx_api_client,
-            zit_api_client=fake_services.zit_api_client,
-            fast_video_pipeline_class=type(fake_services.fast_video_pipeline),
-            image_generation_pipeline_class=type(fake_services.image_generation_pipeline),
-            ic_lora_pipeline_class=type(fake_services.ic_lora_pipeline),
-            depth_processor_pipeline_class=type(fake_services.depth_processor_pipeline),
-            pose_processor_pipeline_class=type(fake_services.pose_processor_pipeline),
-            a2v_pipeline_class=type(fake_services.a2v_pipeline),
-            retake_pipeline_class=type(fake_services.retake_pipeline),
+            dataset_pipeline=fake_services.dataset_pipeline,
+            caption_pipeline=fake_services.caption_pipeline,
+            training_supervisor=fake_services.training_supervisor,
+            verification_pipeline=fake_services.verification_pipeline,
         )
         return build_initial_state(test_state.config, default_app_settings.model_copy(deep=True), service_bundle=bundle)
 
-    def test_load_settings_clamps_from_disk_and_ignores_removed_fields(self, test_state, default_app_settings):
+    def test_load_settings_ignores_deprecated_keys(self, test_state, default_app_settings):
         test_state.config.settings_file.write_text(
             json.dumps(
                 {
@@ -223,34 +171,35 @@ class TestSettingsPersistence:
                     "locked_seed": -55,
                     "fast_model": {"use_upscaler": False},
                     "pro_model": {"steps": 999},
+                    "use_torch_compile": True,
                 }
             ),
             encoding="utf-8",
         )
 
         loaded = self._new_state(test_state, default_app_settings)
-        assert loaded.state.app_settings.prompt_cache_size == 1000
-        assert loaded.state.app_settings.locked_seed == 0
+        # Deprecated keys are stripped, but valid keys are preserved
+        assert loaded.state.app_settings.use_torch_compile is True
         assert "fast_model" not in loaded.state.app_settings.model_dump(by_alias=False)
         assert "pro_model" not in loaded.state.app_settings.model_dump(by_alias=False)
 
-    def test_legacy_prompt_enhancer_key_migrates(self, test_state, default_app_settings):
-        test_state.config.settings_file.write_text(
-            json.dumps({"prompt_enhancer_enabled": False}),
-            encoding="utf-8",
-        )
-
-        loaded = self._new_state(test_state, default_app_settings)
-        assert loaded.state.app_settings.prompt_enhancer_enabled_t2v is False
-        assert loaded.state.app_settings.prompt_enhancer_enabled_i2v is False
-
-    def test_user_prefers_api_video_generations_persists(self, client, test_state, default_app_settings):
-        r = client.post("/api/settings", json={"userPrefersLtxApiVideoGenerations": True})
+    def test_torch_compile_persists(self, client, test_state, default_app_settings):
+        r = client.post("/api/settings", json={"useTorchCompile": True})
         assert r.status_code == 200
-        assert test_state.state.app_settings.user_prefers_ltx_api_video_generations is True
+        assert test_state.state.app_settings.use_torch_compile is True
 
         loaded = self._new_state(test_state, default_app_settings)
-        assert loaded.state.app_settings.user_prefers_ltx_api_video_generations is True
+        assert loaded.state.app_settings.use_torch_compile is True
+
+    def test_nested_settings_persist(self, client, test_state, default_app_settings):
+        r = client.post("/api/settings", json={
+            "captioningDefaults": {"backend": "gemini_api", "modelSize": "8B"},
+        })
+        assert r.status_code == 200
+
+        loaded = self._new_state(test_state, default_app_settings)
+        assert loaded.state.app_settings.captioning_defaults.backend == "gemini_api"
+        assert loaded.state.app_settings.captioning_defaults.model_size == "8B"
 
 
 class TestSettingsSchemaDrift:

@@ -10,10 +10,7 @@ import pytest
 from _routes._errors import HTTPError
 import handlers.models_handler as models_handler_module
 from runtime_config.model_download_specs import (
-    DEPTH_PROCESSOR_CP_ID,
-    IMG_GEN_MODEL_CP_ID,
     LTXLocalModelDeprecated,
-    get_ic_loras_cp_ids,
     get_latest_ltx_model_id,
     get_ltx_model_spec,
     resolve_downloading_dir,
@@ -45,8 +42,7 @@ class TestRecommendations:
             ],
         }
 
-    def test_ltx_recommendation_skips_text_encoder_when_api_key_exists(self, client, test_state):
-        test_state.state.app_settings.ltx_api_key = "test-key"
+    def test_ltx_recommendation_always_includes_text_encoder(self, client, test_state):
         spec = _current_ltx_spec()
         response = client.get("/api/models/ltx-recommendation")
         assert response.status_code == 200
@@ -55,6 +51,7 @@ class TestRecommendations:
             "cps_to_download": [
                 spec.model_cp,
                 spec.upscale_cp,
+                spec.text_encoder_cp,
             ],
         }
 
@@ -78,16 +75,6 @@ class TestRecommendations:
             "cps_to_download": [_current_ltx_spec().text_encoder_cp],
         }
 
-    def test_img_gen_recommendation(self, client, create_fake_model_files):
-        response = client.get("/api/models/img-gen-recommendation")
-        assert response.status_code == 200
-        assert response.json()["cp_to_download"] == IMG_GEN_MODEL_CP_ID
-
-        create_fake_model_files(include_zit=True)
-        response = client.get("/api/models/img-gen-recommendation")
-        assert response.status_code == 200
-        assert response.json()["cp_to_download"] is None
-
     def test_text_encoder_recommendation(self, client, create_fake_model_files, test_state):
         create_fake_model_files()
         text_encoder_path = _cp_path(test_state, _current_ltx_spec().text_encoder_cp)
@@ -100,20 +87,6 @@ class TestRecommendations:
         assert response.json()["cp_to_download"] == _current_ltx_spec().text_encoder_cp
         assert response.json()["expected_size_bytes"] > 0
 
-    def test_ic_lora_recommendation(self, client, create_fake_model_files, create_fake_ic_lora_files):
-        create_fake_model_files()
-        response = client.get("/api/models/ltx-ic-lora-recommendation")
-        assert response.status_code == 200
-        assert response.json()["cps_to_download"] == [
-            *get_ic_loras_cp_ids(_current_ltx_spec().ic_loras_spec),
-            DEPTH_PROCESSOR_CP_ID,
-        ]
-
-        create_fake_ic_lora_files()
-        response = client.get("/api/models/ltx-ic-lora-recommendation")
-        assert response.status_code == 200
-        assert response.json()["cps_to_download"] == []
-
 
 class TestDownloadProgress:
     def test_unknown_session_returns_404(self, client):
@@ -124,19 +97,19 @@ class TestDownloadProgress:
         test_state.state.downloading_session = DownloadingSession(
             id="test-session",
             current_running_file=FileDownloadRunning(
-                file_type="ltx-2.3-22b-distilled",
-                target_path="ltx-2.3-22b-distilled.safetensors",
+                file_type="ltx-2.3-22b-dev",
+                target_path="ltx-2.3-22b-dev.safetensors",
                 downloaded_bytes=5_000_000_000,
                 speed_bytes_per_sec=50_000_000.0,
             ),
-            files_to_download={"ltx-2.3-22b-distilled"},
+            files_to_download={"ltx-2.3-22b-dev"},
             completed_files=set(),
             completed_bytes=0,
         )
         response = client.get("/api/models/download/progress", params={"sessionId": "test-session"})
         assert response.status_code == 200
         assert response.json()["status"] == "downloading"
-        assert response.json()["current_downloading_file"] == "ltx-2.3-22b-distilled"
+        assert response.json()["current_downloading_file"] == "ltx-2.3-22b-dev"
 
     def test_completed_and_error_sessions(self, client, test_state):
         test_state.state.completed_download_sessions["done-session"] = DownloadSessionComplete()
@@ -156,17 +129,17 @@ class TestModelDownloads:
     def test_download_start_success(self, client, test_state):
         response = client.post(
             "/api/models/download",
-            json={"type": "download", "cp_ids": [IMG_GEN_MODEL_CP_ID]},
+            json={"type": "download", "cp_ids": ["gemma-3-12b-it-qat-q4_0-unquantized"]},
         )
         assert response.status_code == 200
         assert response.json()["status"] == "started"
-        assert _cp_path(test_state, IMG_GEN_MODEL_CP_ID).exists()
+        assert _cp_path(test_state, "gemma-3-12b-it-qat-q4_0-unquantized").exists()
 
     def test_download_conflicts_when_another_session_is_running(self, client, test_state):
-        test_state.downloads.start_download({"ltx-2.3-22b-distilled"})
+        test_state.downloads.start_download({"ltx-2.3-22b-dev"})
         response = client.post(
             "/api/models/download",
-            json={"type": "download", "cp_ids": [IMG_GEN_MODEL_CP_ID]},
+            json={"type": "download", "cp_ids": ["gemma-3-12b-it-qat-q4_0-unquantized"]},
         )
         assert_http_error(response, status_code=409, code="DOWNLOAD_ALREADY_RUNNING")
 
@@ -189,14 +162,14 @@ class TestModelDownloads:
 
     def test_upgrade_raises_500_when_latest_ltx_model_is_not_relevant(self, test_state, monkeypatch):
         monkeypatch.setattr(test_state.models, "_current_downloaded_ltx_model_id", lambda: "ltx-legacy")
-        monkeypatch.setattr(models_handler_module, "get_latest_ltx_model_id", lambda: "ltx-2.3-22b-distilled")
-        monkeypatch.setattr(models_handler_module, "get_ltx_model_id_for_cp", lambda cp_id: "ltx-2.3-22b-distilled")
+        monkeypatch.setattr(models_handler_module, "get_latest_ltx_model_id", lambda: "ltx-2.3-22b-dev")
+        monkeypatch.setattr(models_handler_module, "get_ltx_model_id_for_cp", lambda cp_id: "ltx-2.3-22b-dev")
 
         original_get_ltx_model_spec = models_handler_module.get_ltx_model_spec
 
         def _get_ltx_model_spec(model_id):
             spec = original_get_ltx_model_spec(model_id)
-            if model_id == "ltx-2.3-22b-distilled":
+            if model_id == "ltx-2.3-22b-dev":
                 return replace(spec, relevance=LTXLocalModelDeprecated())
             return spec
 
@@ -213,7 +186,7 @@ class TestModelDownloads:
 
         response = client.post(
             "/api/models/download",
-            json={"type": "download", "cp_ids": [IMG_GEN_MODEL_CP_ID]},
+            json={"type": "download", "cp_ids": ["gemma-3-12b-it-qat-q4_0-unquantized"]},
         )
         assert response.status_code == 200
         session_id = response.json()["sessionId"]
@@ -225,7 +198,7 @@ class TestModelDownloads:
     def test_download_uses_progress_callback(self, client, test_state):
         response = client.post(
             "/api/models/download",
-            json={"type": "download", "cp_ids": [IMG_GEN_MODEL_CP_ID]},
+            json={"type": "download", "cp_ids": ["gemma-3-12b-it-qat-q4_0-unquantized"]},
         )
         assert response.status_code == 200
         assert test_state.model_downloader.calls
@@ -233,7 +206,7 @@ class TestModelDownloads:
 
     def test_failed_download_cleans_staging_dir(self, test_state):
         test_state.model_downloader.fail_next = RuntimeError("network error")
-        test_state.downloads.start_model_download(download_type="download", cp_ids={IMG_GEN_MODEL_CP_ID})
+        test_state.downloads.start_model_download(download_type="download", cp_ids={"gemma-3-12b-it-qat-q4_0-unquantized"})
         assert len(test_state.task_runner.errors) == 1
         assert not resolve_downloading_dir(test_state.config.default_models_dir).exists()
 
@@ -243,7 +216,7 @@ class TestCheckpointDeletion:
         response = client.request(
             "DELETE",
             "/api/models/delete",
-            json={"cp_ids": [IMG_GEN_MODEL_CP_ID]},
+            json={"cp_ids": ["gemma-3-12b-it-qat-q4_0-unquantized"]},
         )
         assert response.status_code == 200
         assert response.json()["status"] == "ok"
@@ -256,17 +229,3 @@ class TestCheckpointDeletion:
             json={"cp_ids": [_current_ltx_spec().model_cp]},
         )
         assert_http_error(response, status_code=409, code="DELETE_PROTECTED_CHECKPOINT")
-
-    def test_delete_removes_non_protected_checkpoint(self, client, test_state):
-        img_gen_path = _cp_path(test_state, IMG_GEN_MODEL_CP_ID)
-        img_gen_path.mkdir(parents=True, exist_ok=True)
-        (img_gen_path / "model.safetensors").write_bytes(b"\x00" * 1024)
-
-        response = client.request(
-            "DELETE",
-            "/api/models/delete",
-            json={"cp_ids": [IMG_GEN_MODEL_CP_ID]},
-        )
-        assert response.status_code == 200
-        assert response.json()["status"] == "ok"
-        assert not img_gen_path.exists()

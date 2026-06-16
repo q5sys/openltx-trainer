@@ -69,7 +69,7 @@ function markLicenseAccepted(settingsPath: string): void {
 
 export function registerAppHandlers(): void {
   handle('getBackend', () => {
-    return { url: getBackendUrl() ?? '', token: getAuthToken() ?? '' }
+    return { url: getBackendUrl() ?? '', token: getAuthToken() ?? '', adminToken: getAdminToken() ?? '' }
   })
 
   handle('getModelsPath', () => {

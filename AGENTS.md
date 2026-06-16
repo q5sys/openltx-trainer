@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-LTX Desktop is an Electron app for AI video generation using LTX models. Three-layer architecture:
+OpenLTX Trainer is a fork of LTX Desktop, repurposed as a LORA training application for LTX-Video 2.3. Three-layer architecture:
 
 - **Frontend** (`frontend/`): React 18 + TypeScript + Tailwind CSS renderer
 - **Electron** (`electron/`): Main process managing app lifecycle, IPC, Python backend process, ffmpeg export

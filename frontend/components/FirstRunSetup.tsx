@@ -17,7 +17,6 @@ type Step = 'license' | 'location' | 'installing' | 'complete'
 type StartModelDownloadBody = NonNullable<ApiRequestBodyOf<'startModelDownload'>>
 type ModelCheckpointID = NonNullable<StartModelDownloadBody['cp_ids']>[number]
 type LtxRecommendation = ApiSuccessOf<'getLtxRecommendation'>
-type ImgGenRecommendation = ApiSuccessOf<'getImgGenRecommendation'>
 type DownloadProgress = ApiSuccessOf<'getModelDownloadProgress'>
 type DownloadStepSpec = {
   type: StartModelDownloadBody['type']
@@ -42,30 +41,22 @@ function uniqueCpIds(cpIds: readonly ModelCheckpointID[]): ModelCheckpointID[] {
 
 function buildAccessCheckpointIds(
   ltxRecommendation: LtxRecommendation | null,
-  imgGenRecommendation: ImgGenRecommendation | null,
 ): ModelCheckpointID[] {
-  if (!ltxRecommendation || !imgGenRecommendation) return []
+  if (!ltxRecommendation) return []
 
   const cpIds: ModelCheckpointID[] = []
   if (ltxRecommendation.status === 'download') {
     cpIds.push(...ltxRecommendation.cps_to_download)
-  }
-  if (imgGenRecommendation.cp_to_download) {
-    cpIds.push(imgGenRecommendation.cp_to_download)
   }
   return uniqueCpIds(cpIds)
 }
 
 function buildDownloadSteps(
   ltxRecommendation: LtxRecommendation,
-  imgGenRecommendation: ImgGenRecommendation,
 ): DownloadStepSpec[] {
   const cpIds: ModelCheckpointID[] = []
   if (ltxRecommendation.status === 'download') {
     cpIds.push(...ltxRecommendation.cps_to_download)
-  }
-  if (imgGenRecommendation.cp_to_download) {
-    cpIds.push(imgGenRecommendation.cp_to_download)
   }
   const unique = uniqueCpIds(cpIds)
   return unique.length > 0 ? [{ type: 'download', cpIds: unique }] : []
@@ -95,7 +86,7 @@ export function LaunchGate({
   const [requiredCheckpointIds, setRequiredCheckpointIds] = useState<ModelCheckpointID[]>([])
   const { hfAuthStatus, hfAuthPolling, startHuggingFaceLogin } = useHfAuth(currentStep === 'location')
   const { accessMap, allAuthorized } = useHfModelAccess(requiredCheckpointIds, hfAuthStatus)
-  const { saveLtxApiKey } = useAppSettings()
+  useAppSettings()
   const modelAccessRef = useRef<HTMLDivElement>(null)
   const downloadQueueRef = useRef<DownloadStepSpec[]>([])
   const runningDownloadProgress = downloadProgress?.status === 'downloading' ? downloadProgress : null
@@ -142,10 +133,9 @@ export function LaunchGate({
   const refreshModelRecommendations = useCallback(async () => {
     if (licenseOnly) return
 
-    const [settingsResult, ltxResult, imgGenResult] = await Promise.all([
+    const [settingsResult, ltxResult] = await Promise.all([
       ApiClient.getSettings(),
       ApiClient.getLtxRecommendation(),
-      ApiClient.getImgGenRecommendation(),
     ])
     if (!settingsResult.ok) {
       logger.error(`Failed to fetch model recommendations: ${settingsResult.error.message}`)
@@ -155,13 +145,9 @@ export function LaunchGate({
       logger.error(`Failed to fetch model recommendations: ${ltxResult.error.message}`)
       return
     }
-    if (!imgGenResult.ok) {
-      logger.error(`Failed to fetch model recommendations: ${imgGenResult.error.message}`)
-      return
-    }
 
     setInstallPath(settingsResult.data.modelsDir ?? '')
-    setRequiredCheckpointIds(buildAccessCheckpointIds(ltxResult.data, imgGenResult.data))
+    setRequiredCheckpointIds(buildAccessCheckpointIds(ltxResult.data))
   }, [licenseOnly])
 
   const startDownloadStep = useCallback(async (step: DownloadStepSpec) => {
@@ -266,28 +252,17 @@ export function LaunchGate({
     setCurrentStep('installing')
     try {
       if (ltxApiKey.trim()) {
-        try {
-          await saveLtxApiKey(ltxApiKey.trim())
-        } catch (e) {
-          logger.error(`Failed to save API key: ${e instanceof Error ? e.message : String(e)}`)
-        }
+        logger.info('LTX API key provided during setup (ignored in training mode)')
       }
 
-      const [ltxResult, imgGenResult] = await Promise.all([
-        ApiClient.getLtxRecommendation(),
-        ApiClient.getImgGenRecommendation(),
-      ])
+      const ltxResult = await ApiClient.getLtxRecommendation()
       if (!ltxResult.ok) {
         throw new Error(ltxResult.error.message)
       }
-      if (!imgGenResult.ok) {
-        throw new Error(imgGenResult.error.message)
-      }
       const nextLtxRecommendation = ltxResult.data
-      const nextImgGenRecommendation = imgGenResult.data
-      setRequiredCheckpointIds(buildAccessCheckpointIds(nextLtxRecommendation, nextImgGenRecommendation))
+      setRequiredCheckpointIds(buildAccessCheckpointIds(nextLtxRecommendation))
 
-      const downloadSteps = buildDownloadSteps(nextLtxRecommendation, nextImgGenRecommendation)
+      const downloadSteps = buildDownloadSteps(nextLtxRecommendation)
       if (downloadSteps.length === 0) {
         setCurrentStep('complete')
         return

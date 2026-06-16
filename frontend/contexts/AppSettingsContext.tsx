@@ -1,35 +1,93 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { resetBackendCredentials } from '../lib/backend'
-import { ApiClient, type ApiSuccessOf } from '../lib/api-client'
+import { ApiClient } from '../lib/api-client'
+
+export interface ModelDirs {
+  baseModels: string
+  captioner: string
+  trainedLoras: string
+}
+
+export interface TrainingDefaults {
+  saveOptimizerState: boolean
+  keepLastNCheckpoints: number
+  sampleOnSave: boolean
+  autoAdvancePhases: boolean
+  transformerQuantization: string
+  textEncoderQuantization: string
+}
+
+export interface CaptioningDefaults {
+  backend: string
+  modelFamily: string
+  modelSize: string
+  abliterated: boolean
+  quantization: string
+  captionerIdleTimeoutSeconds: number
+}
+
+export interface CaptioningApiKeys {
+  gemini: string
+  openai: string
+  anthropic: string
+  openaiCompatible: {
+    baseUrl: string
+    apiKey: string
+  }
+}
+
+export interface VerificationDefaults {
+  defaultCfg: number
+  defaultFrames: number
+  defaultSize: number[]
+}
 
 export interface AppSettings {
-  useTorchCompile: boolean
-  hasLtxApiKey: boolean
-  userPrefersLtxApiVideoGenerations: boolean
-  hasFalApiKey: boolean
-  hasGeminiApiKey: boolean
-  useLocalTextEncoder: boolean
-  promptCacheSize: number
-  promptEnhancerEnabledT2V: boolean
-  promptEnhancerEnabledI2V: boolean
-  seedLocked: boolean
-  lockedSeed: number
-  modelsDir: string
+  defaultGpuIndex: number
+  modelDirs: ModelDirs
+  trainingDefaults: TrainingDefaults
+  captioningDefaults: CaptioningDefaults
+  captioningApiKeys: CaptioningApiKeys
+  verificationDefaults: VerificationDefaults
 }
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
-  useTorchCompile: false,
-  hasLtxApiKey: false,
-  userPrefersLtxApiVideoGenerations: false,
-  hasFalApiKey: false,
-  hasGeminiApiKey: false,
-  useLocalTextEncoder: false,
-  promptCacheSize: 1,
-  promptEnhancerEnabledT2V: false,
-  promptEnhancerEnabledI2V: false,
-  seedLocked: false,
-  lockedSeed: 42,
-  modelsDir: '',
+  defaultGpuIndex: 0,
+  modelDirs: {
+    baseModels: 'auto',
+    captioner: 'auto',
+    trainedLoras: 'auto',
+  },
+  trainingDefaults: {
+    saveOptimizerState: true,
+    keepLastNCheckpoints: 0,
+    sampleOnSave: true,
+    autoAdvancePhases: true,
+    transformerQuantization: 'float8',
+    textEncoderQuantization: 'float8',
+  },
+  captioningDefaults: {
+    backend: 'qwen_vl_local',
+    modelFamily: 'qwen3-vl',
+    modelSize: '4B',
+    abliterated: false,
+    quantization: 'fp16',
+    captionerIdleTimeoutSeconds: 300,
+  },
+  captioningApiKeys: {
+    gemini: '',
+    openai: '',
+    anthropic: '',
+    openaiCompatible: {
+      baseUrl: '',
+      apiKey: '',
+    },
+  },
+  verificationDefaults: {
+    defaultCfg: 10.0,
+    defaultFrames: 49,
+    defaultSize: [512, 512],
+  },
 }
 
 type BackendProcessStatus = 'alive' | 'restarting' | 'dead'
@@ -40,11 +98,6 @@ interface AppSettingsContextValue {
   runtimePolicyLoaded: boolean
   updateSettings: (patch: Partial<AppSettings> | ((prev: AppSettings) => AppSettings)) => void
   refreshSettings: () => Promise<void>
-  saveLtxApiKey: (value: string) => Promise<void>
-  saveFalApiKey: (value: string) => Promise<void>
-  saveGeminiApiKey: (value: string) => Promise<void>
-  forceApiGenerations: boolean
-  shouldVideoGenerateWithLtxApi: boolean
 }
 
 const AppSettingsContext = createContext<AppSettingsContextValue | null>(null)
@@ -63,28 +116,27 @@ function toBackendProcessStatus(value: unknown): BackendProcessStatus | null {
 
 function normalizeAppSettings(data: Partial<AppSettings>): AppSettings {
   return {
-    useTorchCompile: data.useTorchCompile ?? DEFAULT_APP_SETTINGS.useTorchCompile,
-    hasLtxApiKey: data.hasLtxApiKey ?? DEFAULT_APP_SETTINGS.hasLtxApiKey,
-    userPrefersLtxApiVideoGenerations: data.userPrefersLtxApiVideoGenerations ?? DEFAULT_APP_SETTINGS.userPrefersLtxApiVideoGenerations,
-    hasFalApiKey: data.hasFalApiKey ?? DEFAULT_APP_SETTINGS.hasFalApiKey,
-    hasGeminiApiKey: data.hasGeminiApiKey ?? DEFAULT_APP_SETTINGS.hasGeminiApiKey,
-    useLocalTextEncoder: data.useLocalTextEncoder ?? DEFAULT_APP_SETTINGS.useLocalTextEncoder,
-    promptCacheSize: data.promptCacheSize ?? DEFAULT_APP_SETTINGS.promptCacheSize,
-    promptEnhancerEnabledT2V: data.promptEnhancerEnabledT2V ?? DEFAULT_APP_SETTINGS.promptEnhancerEnabledT2V,
-    promptEnhancerEnabledI2V: data.promptEnhancerEnabledI2V ?? DEFAULT_APP_SETTINGS.promptEnhancerEnabledI2V,
-    seedLocked: data.seedLocked ?? DEFAULT_APP_SETTINGS.seedLocked,
-    lockedSeed: data.lockedSeed ?? DEFAULT_APP_SETTINGS.lockedSeed,
-    modelsDir: data.modelsDir ?? DEFAULT_APP_SETTINGS.modelsDir,
+    defaultGpuIndex: data.defaultGpuIndex ?? DEFAULT_APP_SETTINGS.defaultGpuIndex,
+    modelDirs: { ...DEFAULT_APP_SETTINGS.modelDirs, ...data.modelDirs },
+    trainingDefaults: { ...DEFAULT_APP_SETTINGS.trainingDefaults, ...data.trainingDefaults },
+    captioningDefaults: { ...DEFAULT_APP_SETTINGS.captioningDefaults, ...data.captioningDefaults },
+    captioningApiKeys: {
+      ...DEFAULT_APP_SETTINGS.captioningApiKeys,
+      ...data.captioningApiKeys,
+      openaiCompatible: {
+        ...DEFAULT_APP_SETTINGS.captioningApiKeys.openaiCompatible,
+        ...data.captioningApiKeys?.openaiCompatible,
+      },
+    },
+    verificationDefaults: { ...DEFAULT_APP_SETTINGS.verificationDefaults, ...data.verificationDefaults },
   }
 }
 
-type RuntimePolicyPayload = ApiSuccessOf<'getRuntimePolicy'>
 
 export function AppSettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS)
   const [isLoaded, setIsLoaded] = useState(false)
   const [runtimePolicyLoaded, setRuntimePolicyLoaded] = useState(false)
-  const [forceApiGenerations, setForceApiGenerations] = useState(true)
   const [backendProcessStatus, setBackendProcessStatus] = useState<BackendProcessStatus | null>(null)
 
   useEffect(() => {
@@ -97,20 +149,9 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
       const result = await ApiClient.getRuntimePolicy()
       if (!result.ok) {
         if (!cancelled) {
-          // Fail closed until policy can be read.
-          setForceApiGenerations(true)
           setRuntimePolicyLoaded(true)
         }
         return
-      }
-
-      const payload = result.data as RuntimePolicyPayload
-      if (typeof payload.force_api_generations !== 'boolean') {
-        if (!cancelled) {
-          setForceApiGenerations(true)
-        }
-      } else if (!cancelled) {
-        setForceApiGenerations(payload.force_api_generations)
       }
 
       if (!cancelled) {
@@ -162,7 +203,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
     if (!result.ok) {
       throw new Error(result.error.message)
     }
-    setSettings(normalizeAppSettings(result.data))
+    setSettings(normalizeAppSettings(result.data as unknown as Partial<AppSettings>))
     setIsLoaded(true)
   }, [])
 
@@ -194,8 +235,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!isLoaded || backendProcessStatus !== 'alive') return
     const syncTimer = setTimeout(async () => {
-      const { hasLtxApiKey: _a, hasFalApiKey: _b, hasGeminiApiKey: _c, modelsDir: _d, ...syncPayload } = settings
-      const result = await ApiClient.updateSettings(syncPayload)
+      const result = await ApiClient.updateSettings(settings as never)
       if (!result.ok) {
         // Best-effort settings sync.
       }
@@ -208,35 +248,8 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
       setSettings((prev) => patch(prev))
       return
     }
-    setSettings((prev) => ({ ...prev, ...patch }))
+    setSettings((prev) => normalizeAppSettings({ ...prev, ...patch }))
   }, [])
-
-  const saveLtxApiKey = useCallback(async (value: string) => {
-    const result = await ApiClient.updateSettings({ ltxApiKey: value })
-    if (!result.ok) {
-      throw new Error(result.error.message)
-    }
-    await refreshSettings()
-  }, [refreshSettings])
-
-  const saveGeminiApiKey = useCallback(async (value: string) => {
-    const result = await ApiClient.updateSettings({ geminiApiKey: value })
-    if (!result.ok) {
-      throw new Error(result.error.message)
-    }
-    await refreshSettings()
-  }, [refreshSettings])
-
-  const saveFalApiKey = useCallback(async (value: string) => {
-    const result = await ApiClient.updateSettings({ falApiKey: value })
-    if (!result.ok) {
-      throw new Error(result.error.message)
-    }
-    await refreshSettings()
-  }, [refreshSettings])
-
-  const shouldVideoGenerateWithLtxApi =
-    forceApiGenerations || (settings.userPrefersLtxApiVideoGenerations && settings.hasLtxApiKey)
 
   const contextValue = useMemo<AppSettingsContextValue>(
     () => ({
@@ -245,13 +258,8 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
       runtimePolicyLoaded,
       updateSettings,
       refreshSettings,
-      saveLtxApiKey,
-      saveFalApiKey,
-      saveGeminiApiKey,
-      forceApiGenerations,
-      shouldVideoGenerateWithLtxApi,
     }),
-    [forceApiGenerations, isLoaded, refreshSettings, runtimePolicyLoaded, saveFalApiKey, saveGeminiApiKey, saveLtxApiKey, settings, shouldVideoGenerateWithLtxApi, updateSettings],
+    [isLoaded, refreshSettings, runtimePolicyLoaded, settings, updateSettings],
   )
 
   return <AppSettingsContext.Provider value={contextValue}>{children}</AppSettingsContext.Provider>

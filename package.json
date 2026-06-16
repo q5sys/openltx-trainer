@@ -1,14 +1,14 @@
 {
-  "name": "ltx-desktop",
-  "version": "1.0.5",
-  "description": "LTX-2 Video Generation - Desktop App",
+  "name": "openltx-trainer",
+  "version": "2.0.0-alpha.0",
+  "description": "OpenLTX Trainer - Train LORA models for LTX-Video locally",
   "type": "module",
   "main": "dist-electron/main.js",
   "author": {
-    "name": "Lightricks",
-    "email": "ltx-desktop-dev@lightricks.com"
+    "name": "q5sys",
+    "email": ""
   },
-  "homepage": "https://github.com/Lightricks/LTX-Desktop",
+  "homepage": "https://github.com/q5sys/LTX-Desktop-LORA-Trainer",
   "license": "Apache-2.0",
   "private": true,
   "packageManager": "pnpm@10.30.3",
@@ -42,8 +42,7 @@
     "react-dom": "^18.3.1",
     "react-resizable-panels": "4.7.2",
     "tailwind-merge": "^2.3.0",
-    "zod": "4.3.6",
-    "zustand": "5.0.12"
+    "zod": "4.3.6"
   },
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",

@@ -8,11 +8,10 @@ from tests.http_error_assertions import assert_http_error
 
 
 def test_validation_errors_use_http_error_response(client):
-    response = client.post("/api/generate", json={})
+    response = client.post("/api/settings", json={"unknownSetting": True})
     assert response.status_code == 422
     payload = response.json()
     assert payload["code"] == "HTTP_422"
-    assert "Field required" in payload["message"]
 
 
 def test_unhandled_exceptions_use_http_error_response(test_state, monkeypatch):
@@ -30,13 +29,10 @@ def test_unhandled_exceptions_use_http_error_response(test_state, monkeypatch):
 def test_app_openapi_registers_shared_http_error_response(test_state):
     schema = create_app(handler=test_state).openapi()
 
-    generate_responses = schema["paths"]["/api/generate"]["post"]["responses"]
-    assert "402" in generate_responses
-    assert "4XX" in generate_responses
-    assert "5XX" in generate_responses
-    assert "422" not in generate_responses
-    assert generate_responses["402"]["content"]["application/json"]["schema"]["$ref"] == "#/components/schemas/LtxInsufficientFundsErrorResponse"
-    assert generate_responses["4XX"]["content"]["application/json"]["schema"]["$ref"] == "#/components/schemas/HTTPErrorResponse"
+    # Verify 4XX/5XX error responses are registered on at least one endpoint
+    settings_responses = schema["paths"]["/api/settings"]["get"]["responses"]
+    assert "4XX" in settings_responses
+    assert "5XX" in settings_responses
 
     schemas = schema["components"]["schemas"]
     assert schemas["HTTPErrorResponse"] == {
@@ -47,9 +43,4 @@ def test_app_openapi_registers_shared_http_error_response(test_state):
         "required": ["code", "message"],
         "title": "HTTPErrorResponse",
         "type": "object",
-    }
-    assert schemas["LtxInsufficientFundsErrorResponse"]["properties"]["code"] == {
-        "const": "LTX_INSUFFICIENT_FUNDS",
-        "title": "Code",
-        "type": "string",
     }

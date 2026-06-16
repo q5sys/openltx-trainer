@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Loader2, AlertCircle, Settings, FileText } from 'lucide-react'
-import { ApiClient, type ApiSuccessOf } from './lib/api-client'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Loader2, Settings, FileText } from 'lucide-react'
 import { ProjectProvider } from './contexts/ProjectContext'
 import { ViewProvider, useView } from './contexts/ViewContext'
 import { KeyboardShortcutsProvider } from './contexts/KeyboardShortcutsContext'
@@ -11,22 +10,16 @@ import { logger } from './lib/logger'
 import { Home } from './views/Home'
 import { Project } from './views/Project'
 import { LaunchGate } from './components/FirstRunSetup'
-import { LtxUpgradePrompt } from './components/LtxUpgradePrompt'
 import { PythonSetup } from './components/PythonSetup'
 import { SettingsModal, type SettingsTabId } from './components/SettingsModal'
 import { LogViewer } from './components/LogViewer'
-import { ApiGatewayModal, type ApiGatewaySection } from './components/ApiGatewayModal'
-import { Button } from './components/ui/button'
 
 type SetupState = 'loading' | { needsSetup: boolean; needsLicense: boolean }
-type RequiredModelsGateState = 'checking' | 'missing' | 'ready'
-type LtxRecommendation = ApiSuccessOf<'getLtxRecommendation'>
-type LtxUpgradeRecommendation = Extract<LtxRecommendation, { status: 'upgrade' }>
 
 function AppContent() {
   const { currentView } = useView()
   const { connected, processStatus, isLoading: backendLoading } = useBackend()
-  const { settings, saveLtxApiKey, saveFalApiKey, forceApiGenerations, isLoaded, runtimePolicyLoaded } = useAppSettings()
+  const { runtimePolicyLoaded } = useAppSettings()
 
   const [pythonReady, setPythonReady] = useState<boolean | null>(null)
   const [backendStarted, setBackendStarted] = useState(false)
@@ -34,24 +27,7 @@ function AppContent() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTabId | undefined>(undefined)
   const [isLogViewerOpen, setIsLogViewerOpen] = useState(false)
-  const [isFinalizingFirstRun, setIsFinalizingFirstRun] = useState(false)
-  const [firstRunFinalizeError, setFirstRunFinalizeError] = useState<string | null>(null)
-  const [requiredModelsGate, setRequiredModelsGate] = useState<RequiredModelsGateState>('checking')
-  const [ltxUpgradeRecommendation, setLtxUpgradeRecommendation] = useState<LtxUpgradeRecommendation | null>(null)
-  const [dismissedUpgradeTargetId, setDismissedUpgradeTargetId] = useState<LtxUpgradeRecommendation['ltx_model_id'] | null>(
-    null,
-  )
   const setupCompletionInFlightRef = useRef<Promise<void> | null>(null)
-
-  type ApiGatewayRequest = {
-    requiredKeys: Array<'ltx' | 'fal'>
-    title: string
-    description: string
-    blocking?: boolean
-    includeOptionalMissing?: boolean
-  }
-
-  const [apiGatewayRequest, setApiGatewayRequest] = useState<ApiGatewayRequest | null>(null)
 
   const isBackendRestarting = processStatus === 'restarting'
   const isBackendDead = processStatus === 'dead'
@@ -67,22 +43,7 @@ function AppContent() {
     return () => window.removeEventListener('open-settings', handler)
   }, [])
 
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent).detail ?? {}
-      const requiredKeys = Array.isArray(detail.requiredKeys) ? detail.requiredKeys : ['ltx']
-      setApiGatewayRequest({
-        requiredKeys,
-        title: detail.title ?? 'Connect API Keys',
-        description: detail.description ?? 'Add the required API keys to continue.',
-        blocking: detail.blocking ?? false,
-        includeOptionalMissing: detail.includeOptionalMissing ?? false,
-      })
-    }
-    window.addEventListener('open-api-gateway', handler)
-    return () => window.removeEventListener('open-api-gateway', handler)
-  }, [])
-
+  // Check if Python environment is ready
   useEffect(() => {
     const check = async () => {
       try {
@@ -96,6 +57,7 @@ function AppContent() {
     void check()
   }, [])
 
+  // Start Python backend once Python is ready
   useEffect(() => {
     if (pythonReady !== true || backendStarted) return
     setBackendStarted(true)
@@ -111,6 +73,7 @@ function AppContent() {
     void start()
   }, [pythonReady, backendStarted])
 
+  // Check first-run state
   useEffect(() => {
     const checkFirstRun = async () => {
       try {
@@ -129,9 +92,6 @@ function AppContent() {
       return setupCompletionInFlightRef.current
     }
 
-    setFirstRunFinalizeError(null)
-    setIsFinalizingFirstRun(true)
-
     const inFlightPromise = (async () => {
       const ok = await window.electronAPI.completeSetup()
       if (!ok) {
@@ -144,13 +104,8 @@ function AppContent() {
 
     try {
       await inFlightPromise
-    } catch (e) {
-      const message = e instanceof Error ? e.message : 'Failed to finalize setup.'
-      setFirstRunFinalizeError(message)
-      throw e
     } finally {
       setupCompletionInFlightRef.current = null
-      setIsFinalizingFirstRun(false)
     }
   }, [])
 
@@ -165,171 +120,6 @@ function AppContent() {
     })
   }, [])
 
-  const saveApiKeyForFirstRun = useCallback(
-    async (apiKey: string) => {
-      const trimmed = apiKey.trim()
-      if (!trimmed) {
-        throw new Error('Please enter a valid LTX API key.')
-      }
-
-      await saveLtxApiKey(trimmed)
-      setFirstRunFinalizeError(null)
-    },
-    [saveLtxApiKey],
-  )
-
-  const isForcedFirstRun =
-    setupState !== 'loading' && setupState.needsSetup && !setupState.needsLicense && forceApiGenerations
-
-  const shouldAutoFinalizeForcedFirstRun =
-    isForcedFirstRun && isLoaded && settings.hasLtxApiKey && !isFinalizingFirstRun && !firstRunFinalizeError
-
-  const areRequiredModelsDownloaded = useCallback(async () => {
-    const [ltxResult, imgGenResult] = await Promise.all([
-      ApiClient.getLtxRecommendation(),
-      ApiClient.getImgGenRecommendation(),
-    ])
-    if (!ltxResult.ok) {
-      throw new Error(ltxResult.error.message)
-    }
-    if (!imgGenResult.ok) {
-      throw new Error(imgGenResult.error.message)
-    }
-    return ltxResult.data.status !== 'download' && imgGenResult.data.cp_to_download === null
-  }, [])
-
-  const handleMissingModelsComplete = useCallback(async () => {
-    const allDownloaded = await areRequiredModelsDownloaded()
-    if (!allDownloaded) {
-      throw new Error('Required models are still missing. Please finish downloading before continuing.')
-    }
-    await handleFirstRunComplete()
-    setRequiredModelsGate('ready')
-  }, [areRequiredModelsDownloaded, handleFirstRunComplete])
-
-  useEffect(() => {
-    if (!shouldAutoFinalizeForcedFirstRun) return
-    void handleFirstRunComplete().catch(() => {
-      // Error state is handled via firstRunFinalizeError.
-    })
-  }, [shouldAutoFinalizeForcedFirstRun, handleFirstRunComplete])
-
-  useEffect(() => {
-    if (setupState === 'loading' || waitingForRuntimePolicy || backendLoading || !connected) {
-      return
-    }
-
-    if (forceApiGenerations || setupState.needsLicense || setupState.needsSetup) {
-      setRequiredModelsGate('ready')
-      return
-    }
-
-    let cancelled = false
-    setRequiredModelsGate('checking')
-
-    const checkRequiredModels = async () => {
-      try {
-        const allDownloaded = await areRequiredModelsDownloaded()
-        if (cancelled) return
-        setRequiredModelsGate(allDownloaded ? 'ready' : 'missing')
-      } catch (e) {
-        logger.error(`Failed to check required model status: ${e}`)
-        if (cancelled) return
-        // Do not block app launch on transient status-check failures.
-        setRequiredModelsGate('ready')
-      }
-    }
-
-    void checkRequiredModels()
-
-    return () => {
-      cancelled = true
-    }
-  }, [
-    areRequiredModelsDownloaded,
-    backendLoading,
-    forceApiGenerations,
-    setupState,
-    connected,
-    waitingForRuntimePolicy,
-  ])
-
-  const refreshLtxUpgradeRecommendation = useCallback(async () => {
-    const result = await ApiClient.getLtxRecommendation()
-    if (!result.ok) {
-      logger.warn(`Failed to fetch LTX upgrade recommendation: ${result.error.message}`)
-      setLtxUpgradeRecommendation(null)
-      return
-    }
-
-    const recommendation = result.data
-    if (recommendation.status === 'upgrade' && recommendation.ltx_model_id !== dismissedUpgradeTargetId) {
-      setLtxUpgradeRecommendation(recommendation)
-      return
-    }
-    setLtxUpgradeRecommendation(null)
-  }, [dismissedUpgradeTargetId])
-
-  useEffect(() => {
-    if (
-      backendLoading
-      || setupState === 'loading'
-      || waitingForRuntimePolicy
-      || !connected
-      || forceApiGenerations
-      || setupState.needsLicense
-      || setupState.needsSetup
-      || requiredModelsGate !== 'ready'
-    ) {
-      setLtxUpgradeRecommendation(null)
-      return
-    }
-
-    let cancelled = false
-    const loadRecommendation = async () => {
-      const result = await ApiClient.getLtxRecommendation()
-      if (cancelled) return
-      if (!result.ok) {
-        logger.warn(`Failed to fetch LTX upgrade recommendation: ${result.error.message}`)
-        setLtxUpgradeRecommendation(null)
-        return
-      }
-
-      const recommendation = result.data
-      if (recommendation.status === 'upgrade' && recommendation.ltx_model_id !== dismissedUpgradeTargetId) {
-        setLtxUpgradeRecommendation(recommendation)
-        return
-      }
-
-      setLtxUpgradeRecommendation(null)
-    }
-
-    void loadRecommendation()
-
-    return () => {
-      cancelled = true
-    }
-  }, [
-    backendLoading,
-    dismissedUpgradeTargetId,
-    forceApiGenerations,
-    requiredModelsGate,
-    setupState,
-    connected,
-    waitingForRuntimePolicy,
-  ])
-
-  const handleDismissLtxUpgradePrompt = useCallback(() => {
-    if (!ltxUpgradeRecommendation) return
-    setDismissedUpgradeTargetId(ltxUpgradeRecommendation.ltx_model_id)
-    setLtxUpgradeRecommendation(null)
-  }, [ltxUpgradeRecommendation])
-
-  const handleCompleteLtxUpgradePrompt = useCallback(async () => {
-    setDismissedUpgradeTargetId(null)
-    await refreshLtxUpgradeRecommendation()
-  }, [refreshLtxUpgradeRecommendation])
-
   const restartingOverlay = isBackendRestarting ? (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm">
       <div className="rounded-lg border border-zinc-700 bg-zinc-900/95 px-6 py-4 text-center shadow-xl">
@@ -342,79 +132,7 @@ function AppContent() {
     </div>
   ) : null
 
-  const showGlobalControls = currentView !== 'home' && connected && setupState !== 'loading' && !setupState.needsSetup
-  const shouldBlockUntilSettingsLoaded = forceApiGenerations && !isLoaded
-  const shouldShowForcedFirstRunUpsell = isForcedFirstRun && isLoaded && !settings.hasLtxApiKey
-  const shouldShowGlobalForcedUpsell = forceApiGenerations && setupState !== 'loading' && !setupState.needsSetup && isLoaded && !settings.hasLtxApiKey
-  const shouldBlockForLtxKey = shouldShowForcedFirstRunUpsell || shouldShowGlobalForcedUpsell
-
-  useEffect(() => {
-    if (shouldBlockForLtxKey && apiGatewayRequest === null) {
-      setApiGatewayRequest({
-        requiredKeys: ['ltx'],
-        title: 'Connect API Keys',
-        description: 'This app is configured for API-only generation. Add your API key to continue.',
-        blocking: true,
-        includeOptionalMissing: true,
-      })
-    }
-  }, [shouldBlockForLtxKey, apiGatewayRequest])
-
-  const shouldShowGateway = apiGatewayRequest !== null
-
-  const gatewaySections: ApiGatewaySection[] = useMemo(() => {
-    if (!apiGatewayRequest) return []
-
-    const handleSaveLtxKey = async (apiKey: string) => {
-      if (isForcedFirstRun) {
-        await saveApiKeyForFirstRun(apiKey)
-        return
-      }
-      await saveLtxApiKey(apiKey)
-    }
-
-    const sections: ApiGatewaySection[] = [
-      {
-        keyType: 'ltx',
-        title: 'LTX API',
-        description: 'Video generation, prompt enhancement, and cloud text encoding.',
-        required: apiGatewayRequest.requiredKeys.includes('ltx'),
-        isConfigured: settings.hasLtxApiKey,
-        inputLabel: 'LTX API key',
-        placeholder: 'Enter your LTX API key...',
-        onSave: handleSaveLtxKey,
-        onGetKey: () => window.electronAPI.openLtxApiKeyPage(),
-        getKeyLabel: 'Get LTX API key',
-      },
-      {
-        keyType: 'fal',
-        title: 'FAL AI',
-        description: 'Required to generate images with Z Image Turbo.',
-        required: apiGatewayRequest.requiredKeys.includes('fal'),
-        isConfigured: settings.hasFalApiKey,
-        inputLabel: 'FAL AI API key',
-        placeholder: 'Enter your FAL AI API key...',
-        onSave: saveFalApiKey,
-        onGetKey: () => window.electronAPI.openFalApiKeyPage(),
-        getKeyLabel: 'Get FAL API key',
-      },
-    ]
-
-    return sections.filter((section) => {
-      if (section.required) return true
-      if (apiGatewayRequest.includeOptionalMissing) return true
-      return false
-    })
-  }, [
-    apiGatewayRequest,
-    isForcedFirstRun,
-    saveApiKeyForFirstRun,
-    saveFalApiKey,
-    saveLtxApiKey,
-    settings.hasFalApiKey,
-    settings.hasLtxApiKey,
-  ])
-
+  // Python setup screen
   if (pythonReady === null) {
     return (
       <div className="h-screen bg-background flex items-center justify-center">
@@ -427,41 +145,37 @@ function AppContent() {
     return <PythonSetup onReady={() => setPythonReady(true)} />
   }
 
+  // Backend dead state
   if (isBackendDead) {
     return (
-      <div className="h-screen bg-background flex items-center justify-center p-6">
-        <div className="w-full max-w-5xl rounded-xl border border-zinc-700 bg-zinc-900/80 p-6 shadow-2xl">
-          <div className="text-center">
-            <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+      <div className="relative h-screen w-screen">
+        <div className="h-screen bg-background flex items-center justify-center">
+          <div className="text-center max-w-lg mx-auto">
+            <div className="flex justify-center mb-4">
+              <div className="h-12 w-12 rounded-full bg-red-500/10 flex items-center justify-center">
+                <svg className="h-6 w-6 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+              </div>
+            </div>
             <h2 className="text-xl font-semibold text-foreground mb-2">The backend process crashed and could not be restarted</h2>
-            <p className="text-muted-foreground mb-4">Review the logs below and restart the application.</p>
-          </div>
-          <div className="h-[50vh]">
-            <LogViewer isOpen={true} onClose={() => {}} embedded={true} />
-          </div>
-          <div className="mt-4 flex justify-center">
-            <Button onClick={() => window.location.reload()}>Restart Application</Button>
+            <p className="text-muted-foreground mb-6">Review the logs below and restart the application.</p>
+            <LogViewer isOpen={true} onClose={() => {}} />
           </div>
         </div>
       </div>
     )
   }
 
-  const waitingForRequiredModels =
-    requiredModelsGate === 'checking' &&
-    connected &&
-    setupState !== 'loading' &&
-    !waitingForRuntimePolicy &&
-    !forceApiGenerations
-
-  if (backendLoading || setupState === 'loading' || waitingForRuntimePolicy || waitingForRequiredModels) {
+  // Loading states
+  if (backendLoading || setupState === 'loading' || waitingForRuntimePolicy) {
     return (
       <div className="relative h-screen w-screen">
         <div className="h-screen bg-background flex items-center justify-center">
           <div className="text-center">
             <Loader2 className="h-12 w-12 text-primary animate-spin mx-auto mb-4" />
-            <h2 className="text-xl font-semibold text-foreground mb-2">Starting LTX Desktop...</h2>
-            <p className="text-muted-foreground">Initializing the inference engine</p>
+            <h2 className="text-xl font-semibold text-foreground mb-2">Starting OpenLTX Trainer...</h2>
+            <p className="text-muted-foreground">Initializing the backend</p>
           </div>
         </div>
         {restartingOverlay}
@@ -469,15 +183,15 @@ function AppContent() {
     )
   }
 
+  // License acceptance
   if (setupState.needsLicense) {
-    const licenseOnly = forceApiGenerations || !setupState.needsSetup
     return (
       <LaunchGate
         showLicenseStep
-        licenseOnly={licenseOnly}
+        licenseOnly={!setupState.needsSetup}
         onAcceptLicense={handleAcceptLicense}
         onComplete={
-          licenseOnly
+          !setupState.needsSetup
             ? async () => {
                 setSetupState((prev) => {
                   if (prev === 'loading') return prev
@@ -490,13 +204,12 @@ function AppContent() {
     )
   }
 
-  if (setupState.needsSetup && !forceApiGenerations) {
+  // First-run setup
+  if (setupState.needsSetup) {
     return <LaunchGate showLicenseStep={false} onComplete={handleFirstRunComplete} />
   }
 
-  if (requiredModelsGate === 'missing') {
-    return <LaunchGate showLicenseStep={false} onComplete={handleMissingModelsComplete} />
-  }
+  const showGlobalControls = currentView !== 'home' && connected && typeof setupState !== 'string' && !setupState.needsSetup
 
   const renderView = () => {
     switch (currentView) {
@@ -541,59 +254,6 @@ function AppContent() {
         }}
         initialTab={settingsInitialTab}
       />
-      <ApiGatewayModal
-        isOpen={shouldShowGateway}
-        blocking={apiGatewayRequest?.blocking}
-        onClose={() => setApiGatewayRequest(null)}
-        title={apiGatewayRequest?.title ?? 'Connect API Keys'}
-        description={apiGatewayRequest?.description ?? 'Add the required API keys to continue.'}
-        sections={gatewaySections}
-      />
-      {ltxUpgradeRecommendation && (
-        <LtxUpgradePrompt
-          recommendation={ltxUpgradeRecommendation}
-          onClose={handleDismissLtxUpgradePrompt}
-          onComplete={handleCompleteLtxUpgradePrompt}
-        />
-      )}
-
-      {shouldBlockUntilSettingsLoaded && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-          <div className="flex items-center gap-2 text-sm text-zinc-200">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Loading settings...
-          </div>
-        </div>
-      )}
-
-      {isForcedFirstRun && isLoaded && settings.hasLtxApiKey && isFinalizingFirstRun && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm">
-          <div className="flex items-center gap-2 text-sm text-zinc-200">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Finalizing setup...
-          </div>
-        </div>
-      )}
-
-      {isForcedFirstRun && firstRunFinalizeError && (
-        <div className="fixed inset-0 z-[61] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md rounded-xl border border-zinc-700 bg-zinc-900 p-5 text-zinc-100">
-            <h3 className="text-base font-semibold">Setup finalization failed</h3>
-            <p className="mt-2 text-sm text-zinc-300">{firstRunFinalizeError}</p>
-            <div className="mt-4 flex justify-end">
-              <Button
-                onClick={() => {
-                  void handleFirstRunComplete().catch(() => {
-                    // Error state is already captured.
-                  })
-                }}
-              >
-                Retry
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {restartingOverlay}
     </div>

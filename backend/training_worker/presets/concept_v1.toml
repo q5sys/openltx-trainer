@@ -1,0 +1,108 @@
+# Concept LORA training preset for LTX-Video 2.3
+# Optimized for learning visual concepts, styles, and environments.
+# Concept training typically needs fewer phases and different guidance values
+# compared to character training.
+
+# Training profile (see memory-bank/feature_two_profile_training.md).
+# "video" trains at [dataset].target_frames (must be 8k+1) using the
+# chosen resampler. Switch to "image" to train a single-frame
+# appearance/style LoRA; the image profile forces target_frames to 1
+# and turns on aspect bucketing automatically.
+profile = "video"
+
+# EMA of the LoRA weights (ai-toolkit decay 0.999). The exported
+# checkpoint and the preview samples read a smoothed shadow of the
+# weights instead of a single noisy step. The optimizer state is always
+# saved from the true live weights so resume is unaffected.
+use_ema = true
+ema_decay = 0.999
+
+# Dynamic, sequence-length-aware sigma shift (SD3 / Flux / ai-toolkit
+# calculate_shift). The schedule is shifted toward high noise in
+# proportion to the packed latent sequence length of each sample.
+use_dynamic_shift = true
+
+[dataset]
+
+
+target_frames = 25
+target_resolution = [512, 512]
+# Dataset repeats (ai-toolkit num_repeats). auto_repeats derives the
+# count from the dataset size (<=30 clips -> 4, <=70 -> 2, else 1),
+# targeting ~100 clip instances per epoch so a small set still reaches
+# the phase step budget. Set auto_repeats = false and num_repeats = N
+# to pin an exact replay count.
+auto_repeats = true
+num_repeats = 1
+
+
+# Sampling cadence is a single global knob (not per-phase). Every
+# sample below runs one preview inference each time the step counter
+# crosses sample_every_n_steps. num_inference_steps, num_frames, and
+# guidance_scale are shared across all samples; each sample owns its
+# own prompt + resolution.
+#
+# num_frames is a preview-only knob and is intentionally kept small.
+# 25 (a valid LTX 8k+1 length) roughly halves the denoise-activation
+# and VAE-decode peak versus 49, which is what pushed video-profile
+# runs into a sample-time OOM on smaller cards (see
+# memory-bank/Training-testing-issues.md issue 11). It also matches the
+# 25-frame training clip length so previews mirror the trained content.
+[sampling]
+# 30 steps is the LTX-2 reference inference floor; 24 left previews soft.
+num_inference_steps = 30
+num_frames = 25
+# Preview CFG = 3.0 to match the LTX-2 reference inference paths (musubi
+# ltx2_defaults.py video_cfg_scale=3.0, LTX-Desktop
+# ltx_pipeline_common.py MultiModalGuiderParams(cfg_scale=3.0)). A
+# cfg_scale of 7-10 over-drives the cond-uncond delta on a flow-matching
+# video model and "deep-fries" the preview (oversaturated, crushed
+# detail), making a good LoRA look broken in-app even though the same
+# weights render cleanly in ComfyUI at cfg 3. Preview-only knob.
+guidance_scale = 3.0
+sample_every_n_steps = 200
+
+
+
+
+[[sampling.samples]]
+prompt = "A scene in the style of {trigger}"
+width = 512
+height = 512
+
+[[sampling.samples]]
+prompt = "A cinematic shot showing {trigger} aesthetics"
+width = 512
+height = 512
+
+[phases.phase1_broad]
+display_name = "Phase 1: Broad Capture"
+ends_at_step = 800
+lora_rank = 32
+learning_rate = 1e-4
+gradient_accumulation = 2
+differential_guidance = 2.5
+timestep_bias = "none"
+save_every_n_steps = 100
+
+[phases.phase2_refine]
+display_name = "Phase 2: Style Refinement"
+ends_at_step = 1600
+lora_rank = 24
+learning_rate = 5e-5
+gradient_accumulation = 2
+differential_guidance = 1.5
+timestep_bias = "none"
+save_every_n_steps = 100
+
+[phases.phase3_polish]
+display_name = "Phase 3: Detail Polish"
+ends_at_step = 2000
+lora_rank = 16
+learning_rate = 2e-5
+gradient_accumulation = 4
+differential_guidance = 1.0
+timestep_bias = "high_noise"
+save_every_n_steps = 100
+
+

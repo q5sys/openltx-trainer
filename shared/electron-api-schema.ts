@@ -11,39 +11,6 @@ function ipcResult<T extends z.ZodRawShape>(valueShape: T) {
 
 export type IpcResult<T extends z.ZodRawShape> = z.infer<ReturnType<typeof ipcResult<T>>>
 
-const emptyResult = ipcResult({})
-
-const exportClip = z.object({
-  path: z.string(),
-  type: z.string(),
-  startTime: z.number(),
-  duration: z.number(),
-  trimStart: z.number(),
-  speed: z.number(),
-  reversed: z.boolean(),
-  flipH: z.boolean(),
-  flipV: z.boolean(),
-  opacity: z.number(),
-  trackIndex: z.number(),
-  muted: z.boolean(),
-  volume: z.number(),
-})
-
-const exportSubtitle = z.object({
-  text: z.string(),
-  startTime: z.number(),
-  endTime: z.number(),
-  style: z.object({
-    fontSize: z.number(),
-    fontFamily: z.string(),
-    fontWeight: z.string(),
-    color: z.string(),
-    backgroundColor: z.string(),
-    position: z.string(),
-    italic: z.boolean(),
-  }),
-})
-
 const logsResponse = z.object({
   logPath: z.string(),
   lines: z.array(z.string()),
@@ -61,7 +28,7 @@ export const electronAPISchemas = {
   // App info
   getBackend: {
     input: z.object({}),
-    output: z.object({ url: z.string(), token: z.string() }),
+    output: z.object({ url: z.string(), token: z.string(), adminToken: z.string() }),
   },
   getModelsPath: {
     input: z.object({}),
@@ -163,35 +130,6 @@ export const electronAPISchemas = {
     output: z.string(),
   },
 
-  // Project assets
-  addVisualAssetToProject: {
-    input: z.object({ srcPath: z.string(), projectId: z.string(), type: z.enum(['video', 'image']) }),
-    output: ipcResult({
-      path: z.string(),
-      bigThumbnailPath: z.string(),
-      smallThumbnailPath: z.string(),
-      width: z.number(),
-      height: z.number(),
-    }),
-  },
-  addGenericAssetToProject: {
-    input: z.object({ srcPath: z.string(), projectId: z.string() }),
-    output: ipcResult({ path: z.string() }),
-  },
-  makeThumbnailsForProjectAsset: {
-    input: z.object({ path: z.string(), type: z.enum(['video', 'image']) }),
-    output: ipcResult({
-      bigThumbnailPath: z.string(),
-      smallThumbnailPath: z.string(),
-    }),
-  },
-  makeDimensionsForProjectAsset: {
-    input: z.object({ path: z.string(), type: z.enum(['video', 'image']) }),
-    output: ipcResult({
-      width: z.number(),
-      height: z.number(),
-    }),
-  },
   getProjectAssetsPath: {
     input: z.object({}),
     output: z.string(),
@@ -239,24 +177,25 @@ export const electronAPISchemas = {
     output: z.array(z.string()).nullable(),
   },
 
-  // Video export
-  exportNative: {
+  // Dataset source import
+  addDatasetSource: {
     input: z.object({
-      clips: z.array(exportClip),
-      outputPath: z.string(),
-      codec: z.string(),
-      width: z.number(),
-      height: z.number(),
-      fps: z.number(),
-      quality: z.number(),
-      letterbox: z.object({ ratio: z.number(), color: z.string(), opacity: z.number() }).optional(),
-      subtitles: z.array(exportSubtitle).optional(),
+      title: z.string().optional(),
+      filters: z.array(fileFilter).optional(),
     }),
-    output: emptyResult,
+    output: z.array(z.string()).nullable(),
   },
-  exportCancel: {
-    input: z.object({ sessionId: z.string() }),
-    output: emptyResult,
+
+  // LORA export helpers
+  showSaveLoraDialog: {
+    input: z.object({
+      defaultName: z.string().optional(),
+    }),
+    output: z.string().nullable(),
+  },
+  revealCheckpoint: {
+    input: z.object({ filePath: z.string() }),
+    output: z.void(),
   },
 
   // Python setup
@@ -275,12 +214,6 @@ export const electronAPISchemas = {
   getBackendHealthStatus: {
     input: z.object({}),
     output: backendHealthStatus.nullable(),
-  },
-
-  // Video processing
-  extractVideoFrame: {
-    input: z.object({ videoPath: z.string(), seekTime: z.number(), width: z.number().optional(), quality: z.number().optional() }),
-    output: z.object({ path: z.string() }),
   },
 
   // Logging

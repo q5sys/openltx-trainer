@@ -1,12 +1,7 @@
-import React, {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useState,
-} from 'react'
-import type { ViewType } from '../types/project-model'
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import { useProjects } from './ProjectContext'
+
+export type ViewType = 'home' | 'project'
 
 interface ViewContextType {
   currentView: ViewType
@@ -18,17 +13,12 @@ interface ViewContextType {
 const ViewContext = createContext<ViewContextType | null>(null)
 
 export function ViewProvider({ children }: { children: React.ReactNode }) {
-  const {
-    activeProject,
-    activateProject,
-    clearActiveProject,
-    setCurrentTab,
-  } = useProjects()
+  const { activeProject, activateProject, clearActiveProject, setCurrentTab } = useProjects()
   const [currentView, setCurrentView] = useState<ViewType>('home')
 
   const openProject = useCallback((projectId: string) => {
     activateProject(projectId)
-    setCurrentTab('gen-space')
+    setCurrentTab('dataset')
     setCurrentView('project')
   }, [activateProject, setCurrentTab])
 

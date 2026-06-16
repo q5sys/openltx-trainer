@@ -7,36 +7,28 @@ from dataclasses import dataclass
 
 from state.app_settings import AppSettings
 from handlers import (
+    CaptionHandler,
+    DatasetHandler,
+    DatasetValidationHandler,
     DownloadHandler,
-    GenerationHandler,
     HealthHandler,
     HuggingFaceAuthHandler,
-    IcLoraHandler,
-    ImageGenerationHandler,
     ModelsHandler,
-    PipelinesHandler,
-    SuggestGapPromptHandler,
-    RetakeHandler,
     RuntimePolicyHandler,
     SettingsHandler,
-    TextHandler,
-    VideoGenerationHandler,
+    TrainingHandler,
+    VerificationHandler,
 )
 from runtime_config.runtime_config import RuntimeConfig
+from services.caption_pipeline.caption_pipeline import CaptionPipeline
+from services.dataset_pipeline.dataset_pipeline import DatasetPipeline
+from services.training_supervisor.training_supervisor import TrainingSupervisor
+from services.verification_pipeline.verification_pipeline import VerificationPipeline
 from services.interfaces import (
-    A2VPipeline,
-    DepthProcessorPipeline,
-    FastVideoPipeline,
-    ZitAPIClient,
-    ImageGenerationPipeline,
     GpuCleaner,
     GpuInfo,
     HTTPClient,
-    IcLoraPipeline,
-    LTXAPIClient,
     ModelDownloader,
-    PoseProcessorPipeline,
-    RetakePipeline,
     TaskRunner,
     TextEncoder,
     VideoProcessor,
@@ -58,15 +50,10 @@ class AppHandler:
         video_processor: VideoProcessor,
         text_encoder: TextEncoder,
         task_runner: TaskRunner,
-        ltx_api_client: LTXAPIClient,
-        zit_api_client: ZitAPIClient,
-        fast_video_pipeline_class: type[FastVideoPipeline],
-        image_generation_pipeline_class: type[ImageGenerationPipeline],
-        ic_lora_pipeline_class: type[IcLoraPipeline],
-        depth_processor_pipeline_class: type[DepthProcessorPipeline],
-        pose_processor_pipeline_class: type[PoseProcessorPipeline],
-        a2v_pipeline_class: type[A2VPipeline],
-        retake_pipeline_class: type[RetakePipeline],
+        dataset_pipeline: DatasetPipeline,
+        caption_pipeline: CaptionPipeline,
+        training_supervisor: TrainingSupervisor,
+        verification_pipeline: VerificationPipeline,
     ) -> None:
         self.config = config
 
@@ -77,23 +64,11 @@ class AppHandler:
         self.gpu_info = gpu_info
         self.video_processor = video_processor
         self.task_runner = task_runner
-        self.ltx_api_client = ltx_api_client
-        self.zit_api_client = zit_api_client
-        self.fast_video_pipeline_class = fast_video_pipeline_class
-        self.image_generation_pipeline_class = image_generation_pipeline_class
-        self.ic_lora_pipeline_class = ic_lora_pipeline_class
-        self.depth_processor_pipeline_class = depth_processor_pipeline_class
-        self.pose_processor_pipeline_class = pose_processor_pipeline_class
-        self.a2v_pipeline_class = a2v_pipeline_class
-        self.retake_pipeline_class = retake_pipeline_class
 
         self._lock = threading.RLock()
 
         self.state = AppState(
             downloading_session=None,
-            gpu_slot=None,
-            active_generation=None,
-            cpu_slot=None,
             text_encoder=TextEncoderState(service=text_encoder),
             app_settings=default_settings.model_copy(deep=True),
         )
@@ -129,48 +104,6 @@ class AppHandler:
             config=config,
         )
 
-        self.text = TextHandler(
-            state=self.state,
-            lock=self._lock,
-            config=config,
-        )
-
-        self.pipelines = PipelinesHandler(
-            state=self.state,
-            lock=self._lock,
-            text_handler=self.text,
-            gpu_cleaner=gpu_cleaner,
-            fast_video_pipeline_class=fast_video_pipeline_class,
-            image_generation_pipeline_class=image_generation_pipeline_class,
-            ic_lora_pipeline_class=ic_lora_pipeline_class,
-            depth_processor_pipeline_class=depth_processor_pipeline_class,
-            pose_processor_pipeline_class=pose_processor_pipeline_class,
-            a2v_pipeline_class=a2v_pipeline_class,
-            retake_pipeline_class=retake_pipeline_class,
-            config=config,
-        )
-
-        self.generation = GenerationHandler(state=self.state, lock=self._lock, config=config)
-
-        self.video_generation = VideoGenerationHandler(
-            state=self.state,
-            lock=self._lock,
-            generation_handler=self.generation,
-            pipelines_handler=self.pipelines,
-            text_handler=self.text,
-            ltx_api_client=ltx_api_client,
-            config=config,
-        )
-
-        self.image_generation = ImageGenerationHandler(
-            state=self.state,
-            lock=self._lock,
-            generation_handler=self.generation,
-            pipelines_handler=self.pipelines,
-            config=config,
-            zit_api_client=zit_api_client,
-        )
-
         self.health = HealthHandler(
             state=self.state,
             lock=self._lock,
@@ -179,34 +112,44 @@ class AppHandler:
             config=config,
         )
 
+        self.dataset = DatasetHandler(
+            state=self.state,
+            lock=self._lock,
+            config=config,
+            dataset_pipeline=dataset_pipeline,
+        )
+
+        self.dataset_validation = DatasetValidationHandler(
+            state=self.state,
+            lock=self._lock,
+            config=config,
+            dataset_pipeline=dataset_pipeline,
+        )
+
+        self.caption = CaptionHandler(
+            state=self.state,
+            lock=self._lock,
+            config=config,
+            caption_pipeline=caption_pipeline,
+        )
+
+        self.training = TrainingHandler(
+            state=self.state,
+            lock=self._lock,
+            config=config,
+            training_supervisor=training_supervisor,
+            gpu_info=gpu_info,
+        )
+
+
+        self.verification = VerificationHandler(
+            state=self.state,
+            lock=self._lock,
+            config=config,
+            verification_pipeline=verification_pipeline,
+        )
+
         self.runtime_policy = RuntimePolicyHandler(config=config)
-
-        self.suggest_gap_prompt = SuggestGapPromptHandler(
-            state=self.state,
-            lock=self._lock,
-            config=config,
-            http=http,
-        )
-
-        self.retake = RetakeHandler(
-            state=self.state,
-            lock=self._lock,
-            ltx_api_client=ltx_api_client,
-            config=config,
-            generation_handler=self.generation,
-            pipelines_handler=self.pipelines,
-            text_handler=self.text,
-        )
-
-        self.ic_lora = IcLoraHandler(
-            state=self.state,
-            lock=self._lock,
-            generation_handler=self.generation,
-            pipelines_handler=self.pipelines,
-            text_handler=self.text,
-            video_processor=video_processor,
-            config=config,
-        )
 
         self.downloads.cleanup_downloading_dir()
 
@@ -227,37 +170,26 @@ class ServiceBundle:
     video_processor: VideoProcessor
     text_encoder: TextEncoder
     task_runner: TaskRunner
-    ltx_api_client: LTXAPIClient
-    zit_api_client: ZitAPIClient
-    fast_video_pipeline_class: type[FastVideoPipeline]
-    image_generation_pipeline_class: type[ImageGenerationPipeline]
-    ic_lora_pipeline_class: type[IcLoraPipeline]
-    depth_processor_pipeline_class: type[DepthProcessorPipeline]
-    pose_processor_pipeline_class: type[PoseProcessorPipeline]
-    a2v_pipeline_class: type[A2VPipeline]
-    retake_pipeline_class: type[RetakePipeline]
+    dataset_pipeline: DatasetPipeline
+    caption_pipeline: CaptionPipeline
+    training_supervisor: TrainingSupervisor
+    verification_pipeline: VerificationPipeline
 
 
 def build_default_service_bundle(config: RuntimeConfig) -> ServiceBundle:
     """Build real runtime services with lazy heavy imports isolated from tests."""
-    from services.fast_video_pipeline.ltx_fast_video_pipeline import LTXFastVideoPipeline
-    from services.zit_api_client.zit_api_client_impl import ZitAPIClientImpl
     from services.gpu_cleaner.torch_cleaner import TorchCleaner
     from services.gpu_info.gpu_info_impl import GpuInfoImpl
     from services.http_client.http_client_impl import HTTPClientImpl
-    from services.a2v_pipeline.ltx_a2v_pipeline import LTXa2vPipeline
-    from services.depth_processor_pipeline.midas_dpt_pipeline import MidasDPTPipeline
-    from services.ic_lora_pipeline.ltx_ic_lora_pipeline import LTXIcLoraPipeline
-    from services.image_generation_pipeline.zit_image_generation_pipeline import ZitImageGenerationPipeline
-    from services.ltx_api_client.ltx_api_client_impl import LTXAPIClientImpl
     from services.model_downloader.hugging_face_downloader import HuggingFaceDownloader
-    from services.retake_pipeline.ltx_retake_pipeline import LTXRetakePipeline
-    from services.pose_processor_pipeline.dw_pose_pipeline import DWPosePipeline
     from services.task_runner.threading_runner import ThreadingRunner
     from services.text_encoder.ltx_text_encoder import LTXTextEncoder
     from services.video_processor.video_processor_impl import VideoProcessorImpl
 
     http = HTTPClientImpl()
+
+    from services.caption_pipeline.caption_pipeline_impl import CaptionPipelineImpl
+    from services.dataset_pipeline.dataset_pipeline_impl import DatasetPipelineImpl
 
     return ServiceBundle(
         http=http,
@@ -268,18 +200,12 @@ def build_default_service_bundle(config: RuntimeConfig) -> ServiceBundle:
         text_encoder=LTXTextEncoder(
             device=config.device,
             http=http,
-            ltx_api_base_url=config.ltx_api_base_url,
         ),
         task_runner=ThreadingRunner(),
-        ltx_api_client=LTXAPIClientImpl(http=http, ltx_api_base_url=config.ltx_api_base_url),
-        zit_api_client=ZitAPIClientImpl(http=http),
-        fast_video_pipeline_class=LTXFastVideoPipeline,
-        image_generation_pipeline_class=ZitImageGenerationPipeline,
-        ic_lora_pipeline_class=LTXIcLoraPipeline,
-        depth_processor_pipeline_class=MidasDPTPipeline,
-        pose_processor_pipeline_class=DWPosePipeline,
-        a2v_pipeline_class=LTXa2vPipeline,
-        retake_pipeline_class=LTXRetakePipeline,
+        dataset_pipeline=DatasetPipelineImpl(),
+        caption_pipeline=CaptionPipelineImpl(),
+        training_supervisor=_build_training_supervisor(config),
+        verification_pipeline=_build_verification_pipeline(config),
     )
 
 
@@ -300,13 +226,30 @@ def build_initial_state(
         video_processor=bundle.video_processor,
         text_encoder=bundle.text_encoder,
         task_runner=bundle.task_runner,
-        ltx_api_client=bundle.ltx_api_client,
-        zit_api_client=bundle.zit_api_client,
-        fast_video_pipeline_class=bundle.fast_video_pipeline_class,
-        image_generation_pipeline_class=bundle.image_generation_pipeline_class,
-        ic_lora_pipeline_class=bundle.ic_lora_pipeline_class,
-        depth_processor_pipeline_class=bundle.depth_processor_pipeline_class,
-        pose_processor_pipeline_class=bundle.pose_processor_pipeline_class,
-        a2v_pipeline_class=bundle.a2v_pipeline_class,
-        retake_pipeline_class=bundle.retake_pipeline_class,
+        dataset_pipeline=bundle.dataset_pipeline,
+        caption_pipeline=bundle.caption_pipeline,
+        training_supervisor=bundle.training_supervisor,
+        verification_pipeline=bundle.verification_pipeline,
     )
+
+
+def _build_training_supervisor(config: RuntimeConfig) -> TrainingSupervisor:
+    """Build the real training supervisor, using the app data directory."""
+    from services.training_supervisor.training_supervisor_impl import TrainingSupervisorImpl
+
+    jobs_root = config.default_models_dir.parent
+    return TrainingSupervisorImpl(jobs_root=jobs_root)
+
+
+def _build_verification_pipeline(config: RuntimeConfig) -> VerificationPipeline:
+    """Build the real verification pipeline stub.
+
+    The real GPU implementation will be added when the LTX model
+    loading and LORA stack logic are implemented. For now this
+    returns the fake pipeline so the app can boot and the UI can
+    be developed against it.
+    """
+    from services.verification_pipeline.fake_verification_pipeline import FakeVerificationPipeline
+
+    jobs_root = config.default_models_dir.parent
+    return FakeVerificationPipeline(jobs_root=jobs_root)

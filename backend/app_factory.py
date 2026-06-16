@@ -15,16 +15,15 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response as StarletteResponse
 
 from _routes._errors import HTTPError, build_http_error_response
-from _routes.generation import router as generation_router
-from _routes.hf_auth import router as hf_auth_router
 from _routes.health import router as health_router
-from _routes.ic_lora import router as ic_lora_router
-from _routes.image_gen import router as image_gen_router
 from _routes.models import router as models_router
-from _routes.suggest_gap_prompt import router as suggest_gap_prompt_router
-from _routes.retake import router as retake_router
-from _routes.runtime_policy import router as runtime_policy_router
 from _routes.settings import router as settings_router
+from _routes.runtime_policy import router as runtime_policy_router
+from _routes.caption import router as caption_router
+from _routes.dataset import router as dataset_router
+from _routes.hf_auth import router as hf_auth_router
+from _routes.training import router as training_router
+from _routes.verification import router as verification_router
 from api_types import HTTPErrorResponse
 from logging_policy import log_http_error, log_unhandled_exception
 from state import init_state_service
@@ -53,7 +52,7 @@ def create_app(
     *,
     handler: "AppHandler",
     allowed_origins: list[str] | None = None,
-    title: str = "LTX-2 Video Generation Server",
+    title: str = "OpenLTX Trainer Server",
     auth_token: str = "",
     admin_token: str = "",
 ) -> FastAPI:
@@ -152,14 +151,13 @@ def create_app(
     app.add_exception_handler(Exception, _route_generic_error_handler)
 
     app.include_router(health_router)
-    app.include_router(generation_router)
     app.include_router(models_router)
     app.include_router(settings_router)
-    app.include_router(image_gen_router)
-    app.include_router(suggest_gap_prompt_router)
-    app.include_router(retake_router)
-    app.include_router(ic_lora_router)
     app.include_router(runtime_policy_router)
     app.include_router(hf_auth_router)
+    app.include_router(dataset_router)
+    app.include_router(caption_router)
+    app.include_router(training_router)
+    app.include_router(verification_router)
 
     return app

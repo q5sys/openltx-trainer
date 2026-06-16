@@ -1,12 +1,10 @@
-"""Video processing (cv2) service for IC-LoRA operations."""
+"""Video processing (cv2) service."""
 
 from __future__ import annotations
 
 import logging
 from typing import cast
 
-from services.depth_processor_pipeline.depth_processor_pipeline import DepthProcessorPipeline
-from services.pose_processor_pipeline.pose_processor_pipeline import PoseProcessorPipeline
 from services.video_processor.video_processor import VideoInfoPayload
 from services.services_utils import FrameArray, VideoCaptureLike, VideoWriterLike
 
@@ -14,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class VideoProcessorImpl:
-    """Wraps cv2 operations for IC-LoRA processing."""
+    """Wraps cv2 operations for video frame processing."""
 
     def open_video(self, path: str) -> VideoCaptureLike:
         import cv2
@@ -47,7 +45,6 @@ class VideoProcessorImpl:
 
         img = frame.copy()
 
-        # Pad for compatibility with training flow.
         H, W = img.shape[:2]
         H_pad = int(np.ceil(H / 64.0) * 64) - H
         W_pad = int(np.ceil(W / 64.0) * 64) - W
@@ -57,19 +54,10 @@ class VideoProcessorImpl:
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         edges = cv2.Canny(gray, 100, 200)
 
-        # Remove padding
         edges = edges[:H, :W]
-
-        # HWC3: convert single-channel to 3-channel
         edges_3ch = np.concatenate([edges[:, :, None]] * 3, axis=2)
 
         return cast(FrameArray, edges_3ch)
-
-    def apply_depth(self, frame: FrameArray, depth_pipeline: DepthProcessorPipeline) -> FrameArray:
-        return depth_pipeline.apply(frame)
-
-    def apply_pose(self, frame: FrameArray, pose_pipeline: PoseProcessorPipeline) -> FrameArray:
-        return pose_pipeline.apply(frame)
 
     def encode_frame_jpeg(self, frame: FrameArray, quality: int = 85) -> bytes:
         import cv2

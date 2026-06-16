@@ -9,11 +9,6 @@ from typing import assert_never, cast, get_args
 
 from api_types import (
     LTXLocalModelId,
-    LTXVideoGenDuration,
-    LTXVideoGenFps,
-    LTXVideoGenPipeline,
-    LTXVideoGenerationResolutionSpec,
-    LTXVideoGenerationSpec,
     ModelCheckpointID,
 )
 
@@ -51,45 +46,18 @@ LTXLocalModelRelevance = LTXLocalModelDeprecated | LTXLocalModelRelevant
 
 
 @dataclass(frozen=True, slots=True)
-class LtxIcLorasSpec:
-    depth_cp: ModelCheckpointID
-    canny_cp: ModelCheckpointID
-    pose_cp: ModelCheckpointID
-
-
-@dataclass(frozen=True, slots=True)
 class LTXLocalModelSpec:
     model_cp: ModelCheckpointID
     upscale_cp: ModelCheckpointID
     text_encoder_cp: ModelCheckpointID
-    ic_loras_spec: LtxIcLorasSpec
     relevance: LTXLocalModelRelevance
-    supported_pipelines: tuple[tuple[LTXVideoGenPipeline, LTXVideoGenerationSpec], ...]
-
-
-def _local_resolution_spec(
-    *,
-    fps_to_durations: dict[LTXVideoGenFps, tuple[LTXVideoGenDuration, ...]],
-) -> LTXVideoGenerationResolutionSpec:
-    return LTXVideoGenerationResolutionSpec(
-        fps_to_durations={
-            fps: list(durations)
-            for fps, durations in fps_to_durations.items()
-        },
-    )
-
-
-IMG_GEN_MODEL_CP_ID: ModelCheckpointID = "z-image-turbo"
-DEPTH_PROCESSOR_CP_ID: ModelCheckpointID = "dpt-hybrid-midas"
-PERSON_DETECTOR_CP_ID: ModelCheckpointID = "yolox-l-torchscript"
-POSE_PROCESSOR_CP_ID: ModelCheckpointID = "dw-ll-ucoco-384-bs5"
 
 
 def get_model_cp_spec(cp_id: ModelCheckpointID) -> ModelCheckpointSpec:
     match cp_id:
-        case "ltx-2.3-22b-distilled":
+        case "ltx-2.3-22b-dev":
             return ModelCheckpointSpec(
-                relative_path=Path("ltx-2.3-22b-distilled.safetensors"),
+                relative_path=Path("ltx-2.3-22b-dev.safetensors"),
                 expected_size_bytes=43_000_000_000,
                 is_folder=False,
                 repo_id="Lightricks/LTX-2.3",
@@ -103,38 +71,6 @@ def get_model_cp_spec(cp_id: ModelCheckpointID) -> ModelCheckpointSpec:
                 repo_id="Lightricks/LTX-2.3",
                 description="2x upscaler",
             )
-        case "ltx-2.3-22b-ic-lora-union-control-ref0.5":
-            return ModelCheckpointSpec(
-                relative_path=Path("ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors"),
-                expected_size_bytes=654_465_352,
-                is_folder=False,
-                repo_id="Lightricks/LTX-2.3-22b-IC-LoRA-Union-Control",
-                description="Union IC-LoRA control model",
-            )
-        case "dpt-hybrid-midas":
-            return ModelCheckpointSpec(
-                relative_path=Path("dpt-hybrid-midas"),
-                expected_size_bytes=500_000_000,
-                is_folder=True,
-                repo_id="Intel/dpt-hybrid-midas",
-                description="DPT-Hybrid MiDaS depth processor",
-            )
-        case "yolox-l-torchscript":
-            return ModelCheckpointSpec(
-                relative_path=Path("yolox_l.torchscript.pt"),
-                expected_size_bytes=217_697_649,
-                is_folder=False,
-                repo_id="hr16/yolox-onnx",
-                description="YOLOX person detector for pose preprocessing",
-            )
-        case "dw-ll-ucoco-384-bs5":
-            return ModelCheckpointSpec(
-                relative_path=Path("dw-ll_ucoco_384_bs5.torchscript.pt"),
-                expected_size_bytes=135_059_124,
-                is_folder=False,
-                repo_id="hr16/DWPose-TorchScript-BatchSize5",
-                description="DW Pose TorchScript processor",
-            )
         case "gemma-3-12b-it-qat-q4_0-unquantized":
             return ModelCheckpointSpec(
                 relative_path=Path("gemma-3-12b-it-qat-q4_0-unquantized"),
@@ -143,13 +79,13 @@ def get_model_cp_spec(cp_id: ModelCheckpointID) -> ModelCheckpointSpec:
                 repo_id="Lightricks/gemma-3-12b-it-qat-q4_0-unquantized",
                 description="Gemma text encoder (bfloat16)",
             )
-        case "z-image-turbo":
+        case "qwen3-vl-4b-instruct":
             return ModelCheckpointSpec(
-                relative_path=Path("Z-Image-Turbo"),
-                expected_size_bytes=31_000_000_000,
+                relative_path=Path("qwen3-vl-4b-instruct"),
+                expected_size_bytes=9_200_000_000,
                 is_folder=True,
-                repo_id="Tongyi-MAI/Z-Image-Turbo",
-                description="Z-Image-Turbo model for text-to-image generation",
+                repo_id="Qwen/Qwen3-VL-4B-Instruct",
+                description="Qwen3-VL 4B captioning model",
             )
         case _:
             assert_never(cp_id)
@@ -157,42 +93,12 @@ def get_model_cp_spec(cp_id: ModelCheckpointID) -> ModelCheckpointSpec:
 
 def get_ltx_model_spec(model_id: LTXLocalModelId) -> LTXLocalModelSpec:
     match model_id:
-        case "ltx-2.3-22b-distilled":
+        case "ltx-2.3-22b-dev":
             return LTXLocalModelSpec(
-                model_cp="ltx-2.3-22b-distilled",
+                model_cp="ltx-2.3-22b-dev",
                 upscale_cp="ltx-2.3-spatial-upscaler-x2-1.0",
                 text_encoder_cp="gemma-3-12b-it-qat-q4_0-unquantized",
-                ic_loras_spec=LtxIcLorasSpec(
-                    depth_cp="ltx-2.3-22b-ic-lora-union-control-ref0.5",
-                    canny_cp="ltx-2.3-22b-ic-lora-union-control-ref0.5",
-                    pose_cp="ltx-2.3-22b-ic-lora-union-control-ref0.5",
-                ),
                 relevance=LTXLocalModelRelevant(upgrade_messages={}),
-                supported_pipelines=(
-                    (
-                        "fast",
-                        LTXVideoGenerationSpec(
-                            display_name="LTX 2.3 Fast",
-                            supported_resolutions_durations={
-                                "540p": _local_resolution_spec(
-                                    fps_to_durations={
-                                        24: (5, 6, 8, 10, 20),
-                                    },
-                                ),
-                                "720p": _local_resolution_spec(
-                                    fps_to_durations={
-                                        24: (5, 6, 8, 10),
-                                    },
-                                ),
-                                "1080p": _local_resolution_spec(
-                                    fps_to_durations={
-                                        24: (5,),
-                                    },
-                                ),
-                            },
-                        ),
-                    ),
-                ),
             )
         case _:
             assert_never(model_id)
@@ -222,17 +128,12 @@ def get_ltx_model_id_for_cp(cp_id: ModelCheckpointID) -> LTXLocalModelId | None:
     return None
 
 
-def get_ic_loras_cp_ids(ic_loras_spec: LtxIcLorasSpec) -> tuple[ModelCheckpointID, ...]:
-    return tuple(dict.fromkeys((ic_loras_spec.depth_cp, ic_loras_spec.canny_cp, ic_loras_spec.pose_cp)))
-
-
 def get_ltx_model_cp_ids(model_id: LTXLocalModelId) -> tuple[ModelCheckpointID, ...]:
     spec = get_ltx_model_spec(model_id)
     return (
         spec.model_cp,
         spec.upscale_cp,
         spec.text_encoder_cp,
-        *get_ic_loras_cp_ids(spec.ic_loras_spec),
     )
 
 

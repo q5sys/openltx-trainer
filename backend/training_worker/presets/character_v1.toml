@@ -1,0 +1,145 @@
+# Character Training Preset v1
+# 4-phase workflow for training character LORAs on LTX-Video 2.3
+# See memory-bank/refactor-plans/06-training-modes-character.md
+
+# Stage F low-VRAM controls (top-level so they bind to TrainingConfig
+# fields). Defaults reproduce the 32 GB (5090, A6000) baseline
+# exactly: no quantization, no block swap, no gradient checkpointing.
+# Smaller-card configurations are picked by the "Auto-tune for my
+# GPU" button in the Training tab or set manually here.
+low_vram_mode = "off"
+blocks_resident_on_gpu = 0
+gradient_checkpointing = false
+
+# These three flags must be top-level so they bind to the matching
+# TrainingConfig fields. They previously lived under a ``[base]`` table
+# which silently dropped them into a non-existent
+# ``TrainingConfig.base`` key during pydantic validation; the runtime
+# defaults happened to match these values so nothing visibly broke, but
+# the same shape under any future preset would mask real overrides.
+base_lora_alpha_equals_rank = true
+cache_text_embeddings = true
+save_optimizer_state = true
+
+# EMA of the LoRA weights (ai-toolkit decay 0.999). When on, the
+# exported checkpoint and the in-training preview samples read a
+# smoothed shadow of the weights instead of a single noisy step, which
+# is what gives the ai-toolkit reference its stable likeness. The
+# optimizer state is always saved from the true live weights so resume
+# is unaffected. Negligible extra VRAM (the LoRA is tiny).
+use_ema = true
+ema_decay = 0.999
+
+# Dynamic, sequence-length-aware sigma shift (SD3 / Flux / ai-toolkit
+# calculate_shift). With a 25-frame video clip the packed sequence is
+# long, so the schedule is shifted toward high noise the way the
+# reference pipeline does; a single 512x512 frame gets a milder shift.
+use_dynamic_shift = true
+
+
+# Training profile (see memory-bank/feature_two_profile_training.md).
+# "video" trains at [dataset].target_frames (must be 8k+1) using the
+# chosen resampler. Switch to "image" to train a single-frame
+# appearance/identity LoRA; the image profile forces target_frames to 1
+# and turns on aspect bucketing automatically.
+profile = "video"
+
+
+[phases.phase1_capture]
+display_name = "Phase 1: Capture"
+ends_at_step = 700
+lora_rank = 48
+learning_rate = 1e-4
+gradient_accumulation = 2
+# Differential guidance per the proven 4-phase reddit recipe
+# (memory-bank/refactor-plans/LTX2.3 in Ostris Ai toolkit ...). The
+# code applies it with ai-toolkit's own-prediction semantics
+# (training_loop.run_phase): target = pred + scale*(target - pred).
+differential_guidance = 3.0
+timestep_bias = "none"
+save_every_n_steps = 100
+
+[phases.phase2_refine]
+
+
+display_name = "Phase 2: Refine"
+ends_at_step = 1300
+lora_rank = 32
+learning_rate = 1e-4
+gradient_accumulation = 1
+differential_guidance = 2.0
+timestep_bias = "none"
+save_every_n_steps = 100
+
+[phases.phase3_polish]
+
+display_name = "Phase 3: Polish"
+ends_at_step = 1900
+lora_rank = 32
+learning_rate = 1e-4
+gradient_accumulation = 1
+differential_guidance = 1.0
+timestep_bias = "none"
+save_every_n_steps = 100
+
+
+[phases.phase4_high_noise]
+
+display_name = "Phase 4: High Noise Detail"
+ends_at_step = 2500
+lora_rank = 24
+learning_rate = 5e-5
+gradient_accumulation = 1
+differential_guidance = 0.0
+timestep_bias = "high_noise"
+save_every_n_steps = 100
+
+[dataset]
+target_frames = 25
+target_resolution = [512, 512]
+# Dataset repeats (ai-toolkit num_repeats). auto_repeats derives the
+# count from the dataset size (<=30 clips -> 4, <=70 -> 2, else 1),
+# targeting ~100 clip instances per epoch so a small set still reaches
+# the phase step budget. Set auto_repeats = false and num_repeats = N
+# to pin an exact replay count.
+auto_repeats = true
+num_repeats = 1
+
+
+# Sampling cadence is a single global knob (not per-phase). Every
+# sample below runs one preview inference each time the step counter
+# crosses sample_every_n_steps. num_inference_steps, num_frames, and
+# guidance_scale are shared across all samples; each sample owns its
+# own prompt + resolution.
+#
+# Sample settings: 512x512, 49 frames, sample every 100 steps. 49
+# frames raises the VAE-decode peak versus 25, so on sub-32 GB cards the
+# "Auto-tune for my GPU" button may lower this; the baseline 5090 /
+# A6000 recipe keeps 49.
+[sampling]
+# 30 steps is the LTX-2 reference inference floor; 24 left previews soft.
+num_inference_steps = 30
+num_frames = 49
+# Preview CFG = 3.0 to match the LTX-2 reference inference paths (musubi
+# ltx2_defaults.py video_cfg_scale=3.0, LTX-Desktop
+# ltx_pipeline_common.py MultiModalGuiderParams(cfg_scale=3.0)). The
+# earlier value of 10 "deep-fried" the preview (oversaturated, crushed
+# detail) and made good LoRAs look broken in-app even though the same
+# weights render cleanly in ComfyUI at cfg 3. This is a preview-only
+# knob; it does not affect the exported LoRA.
+guidance_scale = 3.0
+sample_every_n_steps = 100
+
+
+
+
+
+[[sampling.samples]]
+prompt = "{trigger} talking to the camera in a well-lit room"
+width = 512
+height = 512
+
+[[sampling.samples]]
+prompt = "{trigger} walking through a park on a sunny day"
+width = 512
+height = 512

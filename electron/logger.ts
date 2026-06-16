@@ -31,7 +31,11 @@ export function writeLog(level: LogLevel, source: LogSource, message: string): v
 }
 
 function log(level: LogLevel, consoleMethod: 'log' | 'warn' | 'error', message: string): void {
-  console[consoleMethod](message)
+  try {
+    console[consoleMethod](message)
+  } catch {
+    // Ignore EPIPE errors when stdout/stderr pipe is broken
+  }
   writeLog(level, 'Electron', message)
 }
 

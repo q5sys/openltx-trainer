@@ -1,17 +1,5 @@
 """Tests for /health and /api/gpu-info endpoints."""
 
-from state.app_state_types import GpuSlot, VideoPipelineState
-from tests.fakes.services import FakeFastVideoPipeline
-
-
-def _set_video_pipeline(state):
-    state.state.gpu_slot = GpuSlot(
-        active_pipeline=VideoPipelineState(
-            pipeline=FakeFastVideoPipeline(),
-            is_compiled=False,
-        ),
-    )
-
 
 class TestHealth:
     def test_no_models_loaded(self, client):
@@ -21,14 +9,6 @@ class TestHealth:
         assert data["status"] == "ok"
         assert data["models_loaded"] is False
         assert data["active_model"] is None
-
-    def test_fast_model_loaded(self, client, test_state):
-        _set_video_pipeline(test_state)
-        r = client.get("/health")
-        data = r.json()
-        assert data["models_loaded"] is True
-        assert data["active_model"] == "fast"
-        assert data["models_loaded"] is True
 
     def test_models_downloaded(self, client, create_fake_model_files):
         create_fake_model_files()

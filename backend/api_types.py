@@ -1,46 +1,21 @@
-"""Pydantic request/response models and typed aliases for ltx2_server."""
+"""Pydantic request/response models and typed aliases for the backend server."""
 
 from __future__ import annotations
 
-from typing import Annotated
-from typing import Literal, NamedTuple, TypeAlias
+from typing import Literal, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import BaseModel, Field
 
-NonEmptyPrompt = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 ModelCheckpointID = Literal[
-    "ltx-2.3-22b-distilled",
+    "ltx-2.3-22b-dev",
     "ltx-2.3-spatial-upscaler-x2-1.0",
-    "ltx-2.3-22b-ic-lora-union-control-ref0.5",
-    "dpt-hybrid-midas",
-    "yolox-l-torchscript",
-    "dw-ll-ucoco-384-bs5",
     "gemma-3-12b-it-qat-q4_0-unquantized",
-    "z-image-turbo",
+    "qwen3-vl-4b-instruct",
 ]
-LTXLocalModelId = Literal["ltx-2.3-22b-distilled"]
-
-
-class ImageConditioningInput(NamedTuple):
-    """Image conditioning triplet used by all video pipelines."""
-
-    path: str
-    frame_idx: int
-    strength: float
+LTXLocalModelId = Literal["ltx-2.3-22b-dev"]
 
 
 JsonObject: TypeAlias = dict[str, object]
-VideoCameraMotion = Literal[
-    "none",
-    "dolly_in",
-    "dolly_out",
-    "dolly_left",
-    "dolly_right",
-    "jib_up",
-    "jib_down",
-    "static",
-    "focus_shift",
-]
 
 
 # ============================================================
@@ -70,6 +45,25 @@ class HealthResponse(BaseModel):
     models_status: list[ModelStatusItem]
 
 
+class GpuDeviceItem(BaseModel):
+    index: int
+    name: str
+
+
+class GpuListResponse(BaseModel):
+    devices: list[GpuDeviceItem]
+
+
+class GpuMemoryResponse(BaseModel):
+    # Live per-device VRAM for one GPU index, in MB. ``available`` is
+    # False when the device cannot be queried; the UI then hides the
+    # readout instead of showing zeros.
+    available: bool
+    total_mb: int
+    used_mb: int
+
+
+
 class GpuInfoResponse(BaseModel):
     cuda_available: bool
     mps_available: bool = False
@@ -79,16 +73,118 @@ class GpuInfoResponse(BaseModel):
     gpu_info: GpuTelemetry
 
 
+
+# ============================================================
+# Stage F: low-VRAM auto-tune
+# ============================================================
+
+
+# Mirror of ``training_worker.config.LowVramMode``. Duplicated here so
+# the FastAPI app does not have to import the training_worker package
+# at module load time (the worker package imports torch).
+LowVramModeApi = Literal["off", "fp8", "nf4"]
+
+# Mirror of ``training_worker.engine.gpu_budget.TrainingProfile`` and
+# ``training_worker.config.TrainingConfig.profile``. Duplicated here to
+# keep the FastAPI app free of the torch-importing worker package.
+TrainingProfileApi = Literal["image", "video"]
+
+RecommendationConfidenceApi = Literal[
+    "baseline", "supported", "plausible", "unsupported"
+]
+
+
+class AutoTuneVramRequest(BaseModel):
+    """Request body for ``POST /api/training/auto-tune-vram``.
+
+    All fields are optional. When the hardware fields are omitted the
+    backend queries ``GpuInfo`` for VRAM and ``psutil.virtual_memory()``
+    for host RAM. Supplying them explicitly is the entry point the
+    Stage F smoke script uses to simulate a smaller card on the 5090.
+    """
+
+    vram_bytes: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Override the detected GPU VRAM in bytes. Used by the "
+            "Stage F smoke script to simulate a 24/20/16 GB card on "
+            "a real 32 GB 5090."
+        ),
+    )
+    system_ram_bytes: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Override the detected host RAM in bytes. Mostly useful "
+            "in tests."
+        ),
+    )
+    profile: TrainingProfileApi = Field(
+        default="video",
+        description=(
+            "Training profile to tune for. The image profile (frames=1) "
+            "and video profile (121 frames) have different VRAM curves "
+            "and therefore different tier tables. Defaults to 'video' "
+            "to match TrainingConfig.profile."
+        ),
+    )
+
+
+
+class AutoTuneVramResponse(BaseModel):
+    """One row of the feasibility table returned to the Training UI.
+
+    Mirrors ``training_worker.engine.gpu_budget.LowVramRecommendation``
+    one-to-one. The frontend renders ``tier_label`` and ``warning``
+    verbatim and binds the three knob fields to the start-job form.
+    """
+
+    tier_label: str
+    low_vram_mode: LowVramModeApi
+    blocks_resident_on_gpu: int
+    gradient_checkpointing: bool
+    estimated_peak_vram_gb: float
+    estimated_throughput_multiplier: float
+    required_host_ram_gb: int
+    confidence: RecommendationConfidenceApi
+    warning: str = ""
+    detected_vram_bytes: int
+    detected_system_ram_bytes: int
+
+
+# Mirror of ``training_worker.engine.vram_sweep_data.SweepQuant``.
+SweepQuantApi = Literal["nf4", "fp8", "bf16"]
+
+
+class VramSweepCellResponse(BaseModel):
+    """One measured cell of the VRAM benchmark sweep.
+
+    Mirrors ``training_worker.engine.vram_sweep_data.VramSweepCell``.
+    The Training UI renders the full list as a sortable table so the
+    operator can pick any (quant, blocks_resident) combination, not
+    just the auto-tune recommendation.
+    """
+
+    profile: TrainingProfileApi
+    quant: SweepQuantApi
+    blocks_resident_on_gpu: int
+    peak_vram_gb: float
+    runtime_s: int
+
+
+class VramSweepResponse(BaseModel):
+    """The full measured VRAM sweep plus provenance for the UI."""
+
+    source: str
+    total_blocks: int
+    cells: list[VramSweepCellResponse]
+
+
+
 class RuntimePolicyResponse(BaseModel):
+
     force_api_generations: bool
-
-
-class GenerationProgressResponse(BaseModel):
-    status: Literal["idle", "running", "complete", "cancelled", "error"]
-    phase: str
-    progress: int
-    currentStep: int | None
-    totalSteps: int | None
 
 
 class DownloadProgressRunningResponse(BaseModel):
@@ -116,83 +212,6 @@ class DownloadProgressErrorResponse(BaseModel):
 DownloadProgressResponse: TypeAlias = (
     DownloadProgressRunningResponse | DownloadProgressCompleteResponse | DownloadProgressErrorResponse
 )
-
-
-class SuggestGapPromptResponse(BaseModel):
-    status: Literal["success"] = "success"
-    suggested_prompt: str
-
-
-class GenerateVideoCompleteResponse(BaseModel):
-    status: Literal["complete"]
-    video_path: str
-
-
-class GenerateVideoCancelledResponse(BaseModel):
-    status: Literal["cancelled"]
-
-
-GenerateVideoResponse: TypeAlias = GenerateVideoCompleteResponse | GenerateVideoCancelledResponse
-
-
-class GenerateImageCompleteResponse(BaseModel):
-    status: Literal["complete"]
-    image_paths: list[str]
-
-
-class GenerateImageCancelledResponse(BaseModel):
-    status: Literal["cancelled"]
-
-
-GenerateImageResponse: TypeAlias = GenerateImageCompleteResponse | GenerateImageCancelledResponse
-
-
-class CancelCancellingResponse(BaseModel):
-    status: Literal["cancelling"]
-    id: str
-
-
-class CancelNoActiveGenerationResponse(BaseModel):
-    status: Literal["no_active_generation"]
-
-
-CancelResponse: TypeAlias = CancelCancellingResponse | CancelNoActiveGenerationResponse
-
-
-class RetakeVideoResponse(BaseModel):
-    status: Literal["complete"]
-    video_path: str
-
-
-class RetakePayloadResponse(BaseModel):
-    status: Literal["complete"]
-    result: JsonObject
-
-
-class RetakeCancelledResponse(BaseModel):
-    status: Literal["cancelled"]
-
-
-RetakeResponse: TypeAlias = RetakeVideoResponse | RetakePayloadResponse | RetakeCancelledResponse
-
-
-class IcLoraExtractResponse(BaseModel):
-    conditioning: str
-    original: str
-    conditioning_type: ConditioningType
-    frame_time: float
-
-
-class IcLoraGenerateCompleteResponse(BaseModel):
-    status: Literal["complete"]
-    video_path: str
-
-
-class IcLoraGenerateCancelledResponse(BaseModel):
-    status: Literal["cancelled"]
-
-
-IcLoraGenerateResponse: TypeAlias = IcLoraGenerateCompleteResponse | IcLoraGenerateCancelledResponse
 
 
 # ============================================================
@@ -245,14 +264,6 @@ LtxRecommendationResponse: TypeAlias = (
 )
 
 
-class ImageGenRecommendationResponse(BaseModel):
-    cp_to_download: ModelCheckpointID | None
-
-
-class LtxIcLoraRecommendationResponse(BaseModel):
-    cps_to_download: list[ModelCheckpointID]
-
-
 class TextEncoderRecommendationResponse(BaseModel):
     cp_to_download: ModelCheckpointID | None
     expected_size_bytes: int
@@ -268,66 +279,9 @@ class HTTPErrorResponse(BaseModel):
     message: str
 
 
-class LtxInsufficientFundsErrorResponse(BaseModel):
-    code: Literal["LTX_INSUFFICIENT_FUNDS"]
-    message: str
-
-
 # ============================================================
 # Request Models
 # ============================================================
-
-
-LTXVideoGenResolution: TypeAlias = Literal["540p", "720p", "1080p", "1440p", "2160p"]
-LTXVideoGenDuration: TypeAlias = Literal[5, 6, 8, 10, 12, 14, 16, 18, 20]
-LTXVideoGenFps: TypeAlias = Literal[24, 25, 48, 50]
-LTXVideoGenPipeline: TypeAlias = Literal["fast", "pro"]
-
-
-class LTXVideoGenerationResolutionSpec(BaseModel):
-    fps_to_durations: dict[LTXVideoGenFps, list[LTXVideoGenDuration]]
-
-
-class LTXVideoGenerationSpec(BaseModel):
-    display_name: str
-    supported_resolutions_durations: dict[LTXVideoGenResolution, LTXVideoGenerationResolutionSpec]
-    a2v_supported_resolutions_durations: dict[LTXVideoGenResolution, LTXVideoGenerationResolutionSpec] | None = None
-
-
-class LTXVideoGenerationModelSpecItem(BaseModel):
-    pipeline: LTXVideoGenPipeline
-    spec: LTXVideoGenerationSpec
-
-
-class GenerateVideoModelsSpecsResponse(BaseModel):
-    local_models: list[LTXVideoGenerationModelSpecItem]
-    api_models: list[LTXVideoGenerationModelSpecItem]
-
-
-class GenerateVideoRequest(BaseModel):
-    model_config = ConfigDict(strict=True)
-
-    prompt: NonEmptyPrompt
-    resolution: LTXVideoGenResolution = "1080p"
-    model: LTXVideoGenPipeline = "fast"
-    cameraMotion: VideoCameraMotion = "none"
-    negativePrompt: str = ""
-    duration: LTXVideoGenDuration = 5
-    fps: LTXVideoGenFps = 24
-    audio: bool = False
-    imagePath: str | None = None
-    audioPath: str | None = None
-    aspectRatio: Literal["16:9", "9:16"] = "16:9"
-
-
-class GenerateImageRequest(BaseModel):
-    model_config = ConfigDict(strict=True)
-
-    prompt: NonEmptyPrompt
-    width: int = Field(default=1024, ge=16)
-    height: int = Field(default=1024, ge=16)
-    numSteps: int = Field(default=4, ge=1)
-    numImages: int = Field(default=1, ge=1)
 
 
 def _default_model_types() -> set[ModelCheckpointID]:
@@ -352,72 +306,3 @@ class CheckModelAccessResponse(BaseModel):
 
 class ModelDeleteRequest(BaseModel):
     cp_ids: set[ModelCheckpointID] = Field(default_factory=_default_model_types)
-
-
-GapPromptMode: TypeAlias = Literal["text-to-video", "image-to-video", "text-to-image"]
-
-
-class SuggestGapPromptRequest(BaseModel):
-    model_config = ConfigDict(strict=True)
-
-    beforePrompt: str = ""
-    afterPrompt: str = ""
-    beforeFrame: str | None = None
-    afterFrame: str | None = None
-    gapDuration: float = 5
-    mode: GapPromptMode = "text-to-video"
-    inputImage: str | None = None
-
-    @model_validator(mode="after")
-    def _validate_input_image_mode(self) -> "SuggestGapPromptRequest":
-        if self.inputImage is not None and self.mode != "image-to-video":
-            raise ValueError("inputImage is only valid for image-to-video mode")
-        return self
-
-
-RetakeMode: TypeAlias = Literal["replace_audio_and_video", "replace_video", "replace_audio"]
-
-
-class RetakeRequest(BaseModel):
-    model_config = ConfigDict(strict=True)
-
-    video_path: str
-    start_time: float
-    duration: float
-    prompt: str = ""
-    mode: RetakeMode = "replace_audio_and_video"
-
-
-ConditioningType: TypeAlias = Literal["canny", "depth"]
-
-
-class IcLoraExtractRequest(BaseModel):
-    model_config = ConfigDict(strict=True)
-
-    video_path: str
-    conditioning_type: ConditioningType = "canny"
-    frame_time: float = 0
-
-
-class IcLoraImageInput(BaseModel):
-    model_config = ConfigDict(strict=True)
-
-    path: str
-    frame: int = 0
-    strength: float = 1.0
-
-
-def _default_ic_lora_images() -> list[IcLoraImageInput]:
-    return []
-
-
-class IcLoraGenerateRequest(BaseModel):
-    model_config = ConfigDict(strict=True)
-    video_path: str
-    conditioning_type: ConditioningType
-    prompt: NonEmptyPrompt
-    conditioning_strength: float = 1.0
-    num_inference_steps: int = 30
-    cfg_guidance_scale: float = 1.0
-    negative_prompt: str = ""
-    images: list[IcLoraImageInput] = Field(default_factory=_default_ic_lora_images)
